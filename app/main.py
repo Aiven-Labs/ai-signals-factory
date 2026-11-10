@@ -1,11 +1,13 @@
 """Core app: proposals, approvals, inbound triage, daily tick, access grants.
 Zero model calls on the default path. n8n calls these endpoints on a schedule."""
+import base64
 import hashlib
 import json
 import os
 from datetime import date
 
 import psycopg
+import psycopg.conninfo
 from fastapi import Depends, FastAPI, Header, HTTPException
 from psycopg.rows import dict_row
 from pydantic import BaseModel
@@ -17,8 +19,20 @@ from .schedule import STEPS, due_steps
 app = FastAPI(title="Meetup factory core")
 
 
+def _conninfo():
+    """Validate the server cert against the Aiven project CA when provided."""
+    url = os.environ["DATABASE_URL"]
+    ca = os.environ.get("PROJECT_CA_CERT")
+    if not ca:
+        return url
+    path = "/tmp/aiven-ca.pem"
+    with open(path, "wb") as f:
+        f.write(base64.b64decode(ca))
+    return psycopg.conninfo.make_conninfo(url, sslmode="verify-ca", sslrootcert=path)
+
+
 def db():
-    with psycopg.connect(os.environ["DATABASE_URL"], row_factory=dict_row) as conn:
+    with psycopg.connect(_conninfo(), row_factory=dict_row) as conn:
         yield conn
 
 
