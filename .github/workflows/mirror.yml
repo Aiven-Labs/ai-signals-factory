@@ -1,0 +1,17 @@
+name: mirror-to-aiven-labs
+on:
+  push:
+    branches: [main]
+jobs:
+  mirror:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with: { fetch-depth: 0 }
+      - name: Push to Aiven-Labs
+        env:
+          KEY: ${{ secrets.LABS_MIRROR_KEY }}
+        run: |
+          mkdir -p ~/.ssh && echo "$KEY" > ~/.ssh/id && chmod 600 ~/.ssh/id
+          ssh-keyscan github.com >> ~/.ssh/known_hosts
+          GIT_SSH_COMMAND="ssh -i ~/.ssh/id" git push --force git@github.com:Aiven-Labs/ai-signals-factory.git HEAD:main
