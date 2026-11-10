@@ -1,0 +1,14 @@
+Subject: Speaking at AI Signals on {{ DATE }} - we'd love to have you!
+
+Hi {{ NAME }},
+
+Your talk proposal "{{ TALK_TITLE }}" has been accepted. Are you available to speak at our event on {{ DATE }} {{ TIME }}?
+
+Venue: {{ VENUE }}
+Format: {{ TALK_FORMAT }}
+
+Please confirm your availability and let us know if you have any questions.
+
+Best regards,
+{{ ORGANISER }}
+AI Signals Team

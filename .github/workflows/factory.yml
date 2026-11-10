@@ -1,0 +1,17 @@
+# The software factory: a human adds the `factory` label to an issue and an agent
+# builds the change on Nevia. Nothing runs without the label, so token spend is opt-in.
+name: factory
+on:
+  issues:
+    types: [labeled]
+jobs:
+  build:
+    if: github.event.label.name == 'factory'
+    runs-on: ubuntu-latest
+    env:
+      NEVIA_TOKEN: ${{ secrets.NEVIA_TOKEN }}
+      ISSUE: ${{ github.event.issue.number }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Run agent on Nevia
+        run: bash nevia/factory-job.sh "$ISSUE"

@@ -1,0 +1,12 @@
+{
+  "name": "Daily tick",
+  "nodes": [
+    {"parameters": {"rule": {"interval": [{"field": "days", "triggerAtHour": 8}]}},
+     "name": "Every morning", "type": "n8n-nodes-base.scheduleTrigger", "typeVersion": 1.2, "position": [0, 0]},
+    {"parameters": {"method": "POST", "url": "={{$env.CORE_URL}}/tick",
+                    "sendHeaders": true,
+                    "headerParameters": {"parameters": [{"name": "X-Factory-Token", "value": "={{$env.FACTORY_TOKEN}}"}]}},
+     "name": "Core /tick", "type": "n8n-nodes-base.httpRequest", "typeVersion": 4.2, "position": [260, 0]}
+  ],
+  "connections": {"Every morning": {"main": [[{"node": "Core /tick", "type": "main", "index": 0}]]}}
+}

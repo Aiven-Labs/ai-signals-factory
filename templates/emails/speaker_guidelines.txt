@@ -1,0 +1,11 @@
+Subject: AI Signals speaker guidelines - {{ DATE }} event
+
+Hi {{ NAME }},
+
+With {{ DATE }} approaching, here is what to expect.
+Full talks: 30 minutes including Q&A. Lightning talks: strictly 5 minutes.
+All events follow the NumFOCUS code of conduct: https://numfocus.org/code-of-conduct
+Please register at {{ LUMA_LINK }} and share your slides before or after the event if you can.
+
+{{ ORGANISER }}
+AI Signals Team
