@@ -43,7 +43,7 @@ def test_invite_and_followup_emails_are_exact_and_complete():
     inv = preview.email_for("speaker_invite", pl, EV, "Alper")
     assert inv["to"] == "a@example.com" and "8 December" in inv["subject"] and "Main talk (30-40 minutes)" in inv["body"]
     assert inv["body"].rstrip().endswith("(on behalf of the AI Signals organisers)") and "Alper" not in inv["body"]
-    assert "within 5 days" in inv["body"] and "[" not in inv["body"] and "{{" not in inv["body"] and "at 18:00" in inv["body"]
+    assert "5 days" not in inv["body"] and "another speaker" not in inv["body"] and "[" not in inv["body"] and "{{" not in inv["body"] and "at 18:00" in inv["body"]
     fol = preview.email_for("speaker_followup", pl, EV, "Alper")
     assert fol["subject"].startswith("Re:") and "haven't heard back" in fol["body"] and "{{" not in fol["body"]
     card = preview.render("speaker_invite", pl, EV, "Alper")
