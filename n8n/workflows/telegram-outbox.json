@@ -94,6 +94,24 @@
                       "type": "string",
                       "operation": "equals"
                     }
+                  },
+                  {
+                    "id": "k2",
+                    "leftValue": "={{$json.kind}}",
+                    "rightValue": "speaker_thanks",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    }
+                  },
+                  {
+                    "id": "k3",
+                    "leftValue": "={{$json.kind}}",
+                    "rightValue": "speaker_reconfirm",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    }
                   }
                 ]
               },

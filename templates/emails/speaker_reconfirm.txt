@@ -1,0 +1,18 @@
+Subject: AI Signals on {{ DATE }}: can you still make it?
+
+Hi {{ NAME }},
+
+Just checking in ahead of AI Signals on {{ DATE }}. Can you still attend and give your talk, "{{ TALK_TITLE }}"? Please reply to this email to confirm.
+
+Venue: {{ VENUE }}
+Schedule: {{ SCHEDULE }}
+Please arrive by {{ ARRIVAL }}. The screen supports both HDMI and USB-C connections.
+
+If you have any questions, you can book a time to talk with Hugh here:
+{{ BOOKING_URL }}
+
+More about AI Signals: {{ WEBSITE_URL }}
+
+Best regards,
+The AI Signals organiser bot
+(on behalf of the AI Signals organisers)

@@ -1,0 +1,25 @@
+Subject: Thank you - see you at AI Signals on {{ DATE }}
+
+Hi {{ NAME }},
+
+Thank you for confirming! We're looking forward to your talk, "{{ TALK_TITLE }}", at AI Signals on {{ DATE }}.
+
+Venue: {{ VENUE }}
+Schedule: {{ SCHEDULE }}
+Format: {{ TALK_FORMAT }}
+
+Please arrive by {{ ARRIVAL }} so we can get you set up.
+
+You're welcome to present from your own laptop: the screen supports both HDMI and USB-C connections.
+
+More about AI Signals: {{ WEBSITE_URL }}
+How we handle your information: {{ PRIVACY_URL }}
+
+If you still have any questions, you can book a time to talk with Hugh here:
+{{ BOOKING_URL }}
+
+We'll check in with you again two days before the event to make sure you can still make it.
+
+Best regards,
+The AI Signals organiser bot
+(on behalf of the AI Signals organisers)

@@ -3,7 +3,7 @@ from datetime import date
 from app import preview
 
 EV = {"title": "AI Signals #37", "event_date": date(2026, 12, 8), "venue": "Tessl", "start_time": "18:00",
-      "talks_start": "18:30", "end_time": "21:00",
+      "talks_start": "18:30", "end_time": "21:00", "speaker_arrival": "18:15",
       "venue_address": "Fora - York House, 210 Pentonville Rd, London N1 9JY"}
 
 
@@ -65,3 +65,23 @@ def test_schedule_sentence_handles_missing_parts():
     assert _t("18:00") == "6pm" and _t("18:30") == "6:30pm" and _t("09:05") == "9:05am" and _t("00:00") == "12am"
     assert _schedule({"start_time": "18:00"}) == "Doors open at 6pm."
     assert _schedule({}) == ""
+
+
+def test_thanks_and_reconfirm_emails():
+    pl = {"name": "Anusha", "email": "a@example.com", "title": "From Models to Markets", "format": "main"}
+    for kind in ("speaker_thanks", "speaker_reconfirm"):
+        b = preview.email_for(kind, pl, EV)["body"]
+        assert "{{" not in b and "[" not in b, kind
+        assert "HDMI and USB-C" in b and "arrive by 6:15pm" in b, kind
+        assert "https://aisignals.org.uk" in b and "calendar.google.com/calendar/appointments" in b, kind
+    t = preview.email_for("speaker_thanks", pl, EV)["body"]
+    assert "https://aisignals.org.uk/privacy" in t and "two days before" in t
+    assert "Send = this exact email" in preview.render("speaker_reconfirm", pl, EV)
+
+
+def test_invite_keeps_reply_cta_but_has_no_timescale():
+    pl = {"name": "A", "email": "a@example.com", "title": "T", "format": "main"}
+    for kind in ("speaker_invite", "speaker_followup"):
+        b = preview.email_for(kind, pl, EV)["body"]
+        assert "Please reply to this email to let us know if you can make it." in b, kind
+        assert "days" not in b and "another speaker" not in b, kind

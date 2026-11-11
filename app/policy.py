@@ -27,6 +27,8 @@ KIND_PERMISSION = {
     "speaker_invite": "approve_speaker_contact",
     "speaker_followup": "approve_speaker_contact",
     "speaker_reply": "approve_speaker_contact",
+    "speaker_thanks": "approve_speaker_contact",
+    "speaker_reconfirm": "approve_speaker_contact",
 }
 
 

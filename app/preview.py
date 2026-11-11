@@ -42,6 +42,11 @@ POSTS = {
 }
 
 
+WEBSITE_URL = "https://aisignals.org.uk"
+PRIVACY_URL = "https://aisignals.org.uk/privacy"
+BOOKING_URL = "https://calendar.google.com/calendar/appointments/schedules/AcZssZ2hNYtGgGwkaZWBdXlgso2afLmIporkPcjWceXpcP2g9IWeKZ4znbFojaCNx_ObgPG8KsOXkCyF"
+
+
 def _t(hhmm: str) -> str:
     """'18:30' -> '6:30pm', '18:00' -> '6pm'."""
     h, m = (int(x) for x in hhmm.split(":")[:2])
@@ -68,6 +73,7 @@ def _ctx(ev: dict, host: str | None) -> dict:
     return {"title": ev["title"], "date": d.strftime("%-d %b %Y"), "date_long": d.strftime("%A %-d %B %Y"),
             "venue_name": venue, "venue_full": f"{venue}, {addr}" if addr else venue,
             "at_time": "", "schedule": _schedule(ev),
+            "arrival": _t(ev["speaker_arrival"]) if ev.get("speaker_arrival") else "the start of the doors-open time",
             "luma": ev.get("luma_url") or "(Luma link to follow)", "host": host or "the AI Signals team"}
 
 
@@ -75,7 +81,8 @@ def _invite(name, title, ev, host, fmt=None, template="speaker_invite"):
     """Speaker email from a template: returns (subject, body)."""
     c = _ctx(ev, host)
     raw = (TEMPLATES / f"{template}.txt").read_text().replace("{{ TIME }}", c["at_time"])
-    for k, v in {"{{ DATE }}": c["date_long"], "{{ VENUE }}": c["venue_full"], "{{ SCHEDULE }}": c["schedule"],
+    for k, v in {"{{ DATE }}": c["date_long"], "{{ VENUE }}": c["venue_full"], "{{ SCHEDULE }}": c["schedule"], "{{ ARRIVAL }}": c["arrival"],
+                 "{{ WEBSITE_URL }}": WEBSITE_URL, "{{ PRIVACY_URL }}": PRIVACY_URL, "{{ BOOKING_URL }}": BOOKING_URL,
                  "{{ NAME }}": name or "[speaker name]", "{{ TALK_TITLE }}": title or "[talk title]",
                  "{{ TALK_FORMAT }}": FORMATS.get(fmt, FORMATS[None]), "{{ ORGANISER }}": c["host"]}.items():
         raw = raw.replace(k, v)
@@ -83,7 +90,10 @@ def _invite(name, title, ev, host, fmt=None, template="speaker_invite"):
     return first.removeprefix("Subject:").strip(), rest.strip()
 
 
-EMAIL_TEMPLATES = {"speaker_invite": "speaker_invite", "speaker_followup": "speaker_followup"}
+EMAIL_TEMPLATES = {"speaker_invite": "speaker_invite", "speaker_followup": "speaker_followup",
+                   "speaker_thanks": "speaker_thanks", "speaker_reconfirm": "speaker_reconfirm"}
+EMAIL_LABELS = {"speaker_invite": "Invitation", "speaker_followup": "Follow-up", "speaker_thanks": "Thank-you",
+                "speaker_reconfirm": "Reconfirmation"}
 
 
 def email_for(kind: str, payload: dict, ev: dict | None, host: str | None = None) -> dict | None:
@@ -108,7 +118,7 @@ def render(kind: str, payload: dict, ev: dict | None, host: str | None = None, f
         who = f"{payload.get('name') or 'Unknown'} <{payload.get('email')}>"
         if final:
             return f"Email to {who}:\nSubject: {e['subject']}\n\n{e['body']}"[:LIMIT]
-        label = "Follow-up" if kind == "speaker_followup" else "Invitation"
+        label = EMAIL_LABELS[kind]
         return (f"{head}{label} email, ready to send. Check it carefully.\n\nTo: {who}\nSubject: {e['subject']}\n\n"
                 f"{e['body']}\n\nSend = this exact email goes out now from the AI Signals Gmail. Skip = nothing is sent.")[:LIMIT]
     if kind == "speaker_reply":

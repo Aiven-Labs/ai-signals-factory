@@ -47,7 +47,7 @@ def audit(conn, actor, action, detail):
 
 
 EVENT_KINDS = {"manual", "speaker_email", "public_post", "reminder", "cfp_review",
-               "speaker_invite", "speaker_followup", "speaker_reply"}
+               "speaker_invite", "speaker_followup", "speaker_reply", "speaker_thanks", "speaker_reconfirm"}
 
 
 def propose(conn, idem_key, kind, payload, requested_by="system", event_id=None):
@@ -92,12 +92,19 @@ class DecisionIn(BaseModel):
     decided_by: int          # organisers.id
 
 
-def propose_invite(conn, event_id, speaker_id, fmt, title, kind="speaker_invite"):
+SENT_COLUMN = {"speaker_invite": "invited_at", "speaker_followup": "followup_sent_at",
+               "speaker_thanks": "thanks_sent_at", "speaker_reconfirm": "reconfirm_sent_at"}
+
+
+def propose_invite(conn, event_id, speaker_id, fmt, title, kind="speaker_invite", once=False):
     """Ask the organisers to approve one specific email to one speaker. Nothing is sent until they do."""
+    if once and conn.execute("SELECT 1 FROM proposed_actions WHERE kind=%s AND event_id=%s AND (payload->>'speaker_id')::int=%s "
+                             "AND status IN ('pending','approved','done')", (kind, event_id, speaker_id)).fetchone():
+        return None
     sp = conn.execute("SELECT name, email FROM speakers WHERE id=%s", (speaker_id,)).fetchone()
     n = conn.execute("SELECT count(*) AS n FROM proposed_actions WHERE kind=%s AND event_id=%s "
                      "AND (payload->>'speaker_id')::int=%s", (kind, event_id, speaker_id)).fetchone()["n"]
-    label = "Follow-up email" if kind == "speaker_followup" else "Invitation email"
+    label = preview.EMAIL_LABELS[kind] + " email"
     return propose(conn, f"{kind}:{event_id}:{speaker_id}:{n + 1}", kind,
                    {"summary": f"{label} to {sp['name']}", "speaker_id": speaker_id, "email": sp["email"],
                     "name": sp["name"], "title": title, "format": fmt, "event_id": event_id}, event_id=event_id)
@@ -169,6 +176,9 @@ def apply_decision(conn, pid: int, decision: str, organiser_id: int, variant: st
         if prop["kind"] == "speaker_reply" and decision == "approved":
             if variant == "confirmed":
                 conn.execute("UPDATE event_speakers SET state='confirmed', updated_at=now() WHERE event_id=%s AND speaker_id=%s", (eid, sid))
+                sp_row = conn.execute("SELECT format, talk_title, thanks_sent_at FROM event_speakers WHERE event_id=%s AND speaker_id=%s", (eid, sid)).fetchone()
+                if sp_row and sp_row["thanks_sent_at"] is None:
+                    propose_invite(conn, eid, sid, sp_row["format"], sp_row["talk_title"], kind="speaker_thanks", once=True)
             elif variant == "declined":
                 conn.execute("UPDATE event_speakers SET state='declined', reason='declined by speaker', updated_at=now() "
                              "WHERE event_id=%s AND speaker_id=%s", (eid, sid))
@@ -276,7 +286,8 @@ def event_speakers(event_id: int, conn=Depends(db)):
 def speakers_awaiting(conn=Depends(db)):
     """Invited speakers whose emails have gone out and who haven't replied yet (n8n looks for their replies)."""
     return conn.execute("SELECT es.event_id, es.speaker_id, s.email FROM event_speakers es JOIN speakers s ON s.id=es.speaker_id "
-                        "WHERE es.state='invited' AND es.invited_at IS NOT NULL AND es.last_reply_at IS NULL").fetchall()
+                        "WHERE (es.state='invited' AND es.invited_at IS NOT NULL AND es.last_reply_at IS NULL) "
+                        "OR (es.state='confirmed' AND es.reconfirm_sent_at IS NOT NULL AND es.reconfirm_reply_at IS NULL)").fetchall()
 
 
 class ReplyIn(BaseModel):
@@ -288,12 +299,15 @@ class ReplyIn(BaseModel):
 @app.post("/speakers/reply", dependencies=[Depends(auth)])
 def speaker_reply(r: ReplyIn, conn=Depends(db)):
     """A speaker answered. Stop the follow-up and expiry timers and ask an organiser what it means."""
-    row = conn.execute("SELECT es.event_id, es.speaker_id, es.talk_title, s.name FROM event_speakers es "
-                       "JOIN speakers s ON s.id=es.speaker_id WHERE lower(s.email)=lower(%s) AND es.state='invited' "
-                       "AND es.invited_at IS NOT NULL AND es.last_reply_at IS NULL", (r.email.strip(),)).fetchone()
+    row = conn.execute("SELECT es.event_id, es.speaker_id, es.talk_title, es.state, s.name FROM event_speakers es "
+                       "JOIN speakers s ON s.id=es.speaker_id WHERE lower(s.email)=lower(%s) AND "
+                       "((es.state='invited' AND es.invited_at IS NOT NULL AND es.last_reply_at IS NULL) OR "
+                       "(es.state='confirmed' AND es.reconfirm_sent_at IS NOT NULL AND es.reconfirm_reply_at IS NULL))",
+                       (r.email.strip(),)).fetchone()
     if not row:
-        return {"skipped": "no invited speaker waiting on that address"}
-    conn.execute("UPDATE event_speakers SET last_reply_at=now(), updated_at=now() WHERE event_id=%s AND speaker_id=%s",
+        return {"skipped": "no speaker waiting on that address"}
+    col = "reconfirm_reply_at" if row["state"] == "confirmed" else "last_reply_at"
+    conn.execute(f"UPDATE event_speakers SET {col}=now(), updated_at=now() WHERE event_id=%s AND speaker_id=%s",
                  (row["event_id"], row["speaker_id"]))
     pid = propose(conn, f"reply:{row['event_id']}:{row['speaker_id']}:{r.message_id}", "speaker_reply",
                   {"summary": f"Reply from {row['name']}", "speaker_id": row["speaker_id"], "email": r.email.strip().lower(),
@@ -359,7 +373,7 @@ def executor_queue(conn=Depends(db)):
         artifact = preview.render(p["kind"], p["payload"], ev, host, final=True)
         email = preview.email_for(p["kind"], p["payload"], ev, host)
         if email:      # an approved email: stamp the send time now so a restart can never send it twice
-            col = "followup_sent_at" if p["kind"] == "speaker_followup" else "invited_at"
+            col = SENT_COLUMN[p["kind"]]
             conn.execute(f"UPDATE event_speakers SET {col}=now(), updated_at=now() WHERE event_id=%s AND speaker_id=%s",
                          (p["event_id"], p["payload"].get("speaker_id")))
             audit(conn, "executor", "email_released", {"id": p["id"], "kind": p["kind"], "to_speaker": p["payload"].get("speaker_id")})
@@ -378,9 +392,9 @@ def executor_queue(conn=Depends(db)):
 def email_failed(pid: int, conn=Depends(db)):
     """n8n could not send an approved email. Clear the sent stamp so timers don't run for an email that never left."""
     p = conn.execute("SELECT * FROM proposed_actions WHERE id=%s", (pid,)).fetchone()
-    if not p or p["kind"] not in ("speaker_invite", "speaker_followup"):
+    if not p or p["kind"] not in SENT_COLUMN:
         raise HTTPException(404, "not an email proposal")
-    col = "followup_sent_at" if p["kind"] == "speaker_followup" else "invited_at"
+    col = SENT_COLUMN[p["kind"]]
     conn.execute(f"UPDATE event_speakers SET {col}=NULL, updated_at=now() WHERE event_id=%s AND speaker_id=%s",
                  (p["event_id"], p["payload"].get("speaker_id")))
     conn.execute("UPDATE proposed_actions SET status='failed' WHERE id=%s", (pid,))
@@ -442,9 +456,17 @@ def tick(today: date | None = None, conn=Depends(db)):
             fill_slot(conn, r["event_id"], r["format"])
             expired += 1
         elif r["age"] >= timedelta(days=2) and r["followup_sent_at"] is None:
-            if propose_invite(conn, r["event_id"], r["speaker_id"], r["format"], r["talk_title"], kind="speaker_followup"):
+            if propose_invite(conn, r["event_id"], r["speaker_id"], r["format"], r["talk_title"], kind="speaker_followup", once=True):
                 followups += 1
-    return {"created": created, "followups_proposed": followups, "expired": expired, "steps_defined": len(STEPS)}
+    reconfirms = 0
+    for r in conn.execute("SELECT es.event_id, es.speaker_id, es.format, es.talk_title FROM event_speakers es "
+                          "JOIN events e ON e.id=es.event_id WHERE es.state='confirmed' AND es.reconfirm_sent_at IS NULL "
+                          "AND e.status IN ('planning','confirmed') AND e.event_date >= %s AND e.event_date <= %s",
+                          (today, today + timedelta(days=2))).fetchall():
+        if propose_invite(conn, r["event_id"], r["speaker_id"], r["format"], r["talk_title"], kind="speaker_reconfirm", once=True):
+            reconfirms += 1
+    return {"created": created, "followups_proposed": followups, "reconfirms_proposed": reconfirms,
+            "expired": expired, "steps_defined": len(STEPS)}
 
 
 class GrantIn(BaseModel):

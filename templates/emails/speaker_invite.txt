@@ -8,6 +8,8 @@ Venue: {{ VENUE }}
 Schedule: {{ SCHEDULE }}
 Format: {{ TALK_FORMAT }}
 
+Please reply to this email to let us know if you can make it.
+
 Best regards,
 The AI Signals organiser bot
 (on behalf of the AI Signals organisers)

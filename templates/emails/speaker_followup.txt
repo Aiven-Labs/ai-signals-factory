@@ -7,7 +7,7 @@ A quick follow-up on our invitation to give a talk, "{{ TALK_TITLE }}", at AI Si
 Schedule: {{ SCHEDULE }}
 Format: {{ TALK_FORMAT }}
 
-We haven't heard back yet. Could you let us know whether you can make it? If we don't hear from you in the next few days we'll offer the slot to another speaker.
+We haven't heard back yet. Please reply to this email to let us know if you can make it.
 
 Best regards,
 The AI Signals organiser bot
