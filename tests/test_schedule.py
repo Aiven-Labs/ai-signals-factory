@@ -29,3 +29,10 @@ def test_post_event_steps_become_due_after():
 def test_every_step_has_unique_key():
     assert len({s.key for s in STEPS}) == len(STEPS)
     assert due_date(EVENT, STEPS[0]) == date(2026, 11, 8)
+
+
+def test_parse_submitted_formats():
+    from app.main import parse_submitted
+    assert parse_submitted("10/16/2025 14:00:07").year == 2025
+    assert parse_submitted(46000.45237).year == 2025
+    assert parse_submitted("garbage") is None

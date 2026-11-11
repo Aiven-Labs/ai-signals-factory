@@ -40,10 +40,39 @@ def _ctx(ev: dict, host: str | None) -> dict:
             "venue_name": (ev.get("venue") or "[venue]"), "host": host or "[host]"}
 
 
+def _invite(name, title, ev, host):
+    """Speaker invite from the template: returns (subject, body)."""
+    c = _ctx(ev, host)
+    raw = (TEMPLATES / "speaker_invite.txt").read_text()
+    for k, v in {"{{ DATE }}": c["date_long"], "{{ TIME }}": "[time]", "{{ VENUE }}": c["venue_name"],
+                 "{{ NAME }}": name or "[speaker name]", "{{ TALK_TITLE }}": title or "[talk title]",
+                 "{{ TALK_FORMAT }}": "[full talk / lightning talk]", "{{ ORGANISER }}": c["host"]}.items():
+        raw = raw.replace(k, v)
+    first, _, rest = raw.partition("\n")
+    return first.removeprefix("Subject:").strip(), rest.strip()
+
+
+def draft(kind: str, payload: dict, ev: dict | None, host: str | None = None) -> dict | None:
+    """An email to create as a Gmail DRAFT (never sent) once the proposal is approved, or None."""
+    if kind == "cfp_review" and ev and payload.get("email"):
+        subject, body = _invite(payload.get("name"), payload.get("title"), ev, host)
+        return {"to": payload["email"], "subject": subject, "body": body}
+    return None
+
+
 def render(kind: str, payload: dict, ev: dict | None, host: str | None = None, final: bool = False) -> str:
     """Text for the Telegram message. `payload` is the proposal payload; `ev` the events row (or None).
     final=True returns only the artifact itself (email body, post text, instruction), no header or footer."""
     step = payload.get("step")
+    if kind == "cfp_review":
+        who = f"{payload.get('name') or 'Unknown'} <{payload.get('email')}>"
+        body = f"Talk: {payload.get('title') or '[no title]'}\n\n{(payload.get('message') or '')[:900]}"
+        if final:
+            d = draft(kind, payload, ev, host)
+            return (f"Gmail draft for {who}:\nSubject: {d['subject']}\n\n{d['body']}" if d else
+                    f"Proposal from {who}: no upcoming event is set up, so no draft was made.")[:LIMIT]
+        return (f"New talk proposal from {who}\n\n{body}\n\nApprove = create a Gmail DRAFT invitation "
+                f"(not sent, you send it). Reject = skip, no email.")[:LIMIT]
     if not ev:
         return payload.get("summary", "")
     c = _ctx(ev, host)

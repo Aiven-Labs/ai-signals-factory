@@ -23,6 +23,7 @@ KIND_PERMISSION = {
     "access_grant": "approve_access_grant",
     "reminder": "approve_public_post",
     "manual": "approve_manual_step",
+    "cfp_review": "approve_speaker_contact",
 }
 
 

@@ -23,3 +23,7 @@ def test_unknown_kind_denied():
 def test_manual_steps_can_be_decided_by_volunteers_but_not_observers():
     assert can_decide("volunteer", "manual", 1)
     assert not can_decide("observer", "manual", 1)
+
+
+def test_cfp_review_needs_speaker_contact_permission():
+    assert can_decide("organiser", "cfp_review", 1) and not can_decide("volunteer", "cfp_review", 1)

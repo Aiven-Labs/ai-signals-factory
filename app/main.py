@@ -4,7 +4,7 @@ import base64
 import hashlib
 import json
 import os
-from datetime import date
+from datetime import date, datetime, timedelta
 
 import psycopg
 import psycopg.conninfo
@@ -108,6 +108,56 @@ def decide(pid: int, d: DecisionIn, conn=Depends(db)):
     return apply_decision(conn, pid, d.decision, d.decided_by)
 
 
+def parse_submitted(v):
+    """Form timestamp: a Sheets serial number or 'MM/DD/YYYY HH:MM:SS' or ISO. None if unreadable."""
+    try:
+        if isinstance(v, (int, float)) or str(v).replace(".", "", 1).isdigit():
+            return datetime(1899, 12, 30) + timedelta(days=float(v))
+        for fmt in ("%m/%d/%Y %H:%M:%S", "%Y-%m-%d %H:%M:%S", "%Y-%m-%dT%H:%M:%S"):
+            try:
+                return datetime.strptime(str(v).strip()[:19], fmt)
+            except ValueError:
+                pass
+    except (ValueError, TypeError, OverflowError):
+        pass
+    return None
+
+
+class CfpIn(BaseModel):
+    submitted: str | float | int | None = None
+    email: str
+    name: str = ""
+    title: str = ""
+    message: str = ""
+    status: str = ""
+
+
+@app.post("/cfp", dependencies=[Depends(auth)])
+def cfp(r: CfpIn, conn=Depends(db)):
+    """A talk proposal row from the CFP sheet. Only unreviewed, recent rows become proposals."""
+    if r.status.strip():
+        return {"skipped": "already reviewed"}
+    when = parse_submitted(r.submitted)
+    max_age = int(os.environ.get("CFP_MAX_AGE_DAYS", "45"))
+    if when is None:
+        return {"skipped": "unreadable timestamp"}
+    if datetime.now() - when > timedelta(days=max_age):
+        return {"skipped": "too old"}
+    email = r.email.strip().lower()
+    sp = conn.execute("INSERT INTO speakers(name, email, source_row) VALUES (%s,%s,%s) "
+                      "ON CONFLICT (email) DO UPDATE SET name=EXCLUDED.name RETURNING id",
+                      (r.name.strip() or email, email, str(r.submitted))).fetchone()
+    pid = propose(conn, f"cfp:{email}:{r.submitted}", "cfp_review",
+                  {"summary": f"Talk proposal from {r.name or email}: {r.title}", "speaker_id": sp["id"],
+                   "email": email, "name": r.name.strip(), "title": r.title.strip(), "message": r.message.strip()[:2000]})
+    return {"proposal": pid, "duplicate": pid is None}
+
+
+def next_event(conn):
+    return conn.execute("SELECT * FROM events WHERE status IN ('planning','confirmed') AND event_date >= %s "
+                        "ORDER BY event_date LIMIT 1", (date.today(),)).fetchone()
+
+
 @app.get("/outbox", dependencies=[Depends(auth)])
 def outbox(conn=Depends(db)):
     """One row per (pending, not yet announced proposal, organiser who may decide it and has Telegram linked)."""
@@ -169,13 +219,22 @@ def executor_queue(conn=Depends(db)):
             if ev and ev["host_id"]:
                 h = conn.execute("SELECT name FROM organisers WHERE id=%s", (ev["host_id"],)).fetchone()
                 host = h["name"] if h else None
+        if p["kind"] == "cfp_review":
+            ev = next_event(conn)
+            host = None
+            if ev and ev["host_id"]:
+                h = conn.execute("SELECT name FROM organisers WHERE id=%s", (ev["host_id"],)).fetchone()
+                host = h["name"] if h else None
         artifact = preview.render(p["kind"], p["payload"], ev, host, final=True)
-        text = (f"Approved #{p['id']} [{p['kind']}] by {p['decider']}.\n"
-                f"Nothing was sent automatically (no sending account is connected yet). Use this:\n\n{artifact}")
+        draft = preview.draft(p["kind"], p["payload"], ev, host)
+        note = ("A Gmail draft is being created in Drafts (NOT sent). Check and send it yourself."
+                if draft else "Nothing was sent automatically (no sending account is connected for this).")
+        text = f"Approved #{p['id']} [{p['kind']}] by {p['decider']}.\n{note}\n\n{artifact}"
         conn.execute("UPDATE proposed_actions SET status='done', executed_at=now() WHERE id=%s", (p["id"],))
         audit(conn, "executor", "handed_over", {"id": p["id"], "kind": p["kind"]})
         if p["decider_chat"]:
-            out.append({"pid": p["id"], "kind": p["kind"], "chat_id": p["decider_chat"], "text": text[:4000]})
+            out.append({"pid": p["id"], "kind": p["kind"], "chat_id": p["decider_chat"], "text": text[:4000],
+                        "draft": draft})
     return out
 
 

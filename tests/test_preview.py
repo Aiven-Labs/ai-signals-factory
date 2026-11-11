@@ -24,3 +24,12 @@ def test_final_text_has_no_header_or_footer():
     t = preview.render("public_post", {"step": "slack_announce"}, EV, final=True)
     assert t.startswith("AI Signals #37 is on") and "Approve =" not in t and "ACTION" not in t
     assert "Subject:" in preview.render("speaker_email", {"step": "speakers"}, EV, "A", final=True)
+
+
+def test_cfp_review_preview_and_draft():
+    pl = {"name": "Mary", "email": "m@example.com", "title": "AI in health", "message": "Hello"}
+    t = preview.render("cfp_review", pl, None)
+    assert "Mary <m@example.com>" in t and "NOT" not in t and "DRAFT" in t
+    d = preview.draft("cfp_review", pl, EV, "Alper")
+    assert d["to"] == "m@example.com" and "8 December" in d["subject"] and "AI in health" in d["body"]
+    assert preview.draft("manual", {}, EV) is None
