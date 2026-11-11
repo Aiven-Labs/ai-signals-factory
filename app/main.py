@@ -153,6 +153,32 @@ def decide_telegram(pid: int, d: TgDecisionIn, conn=Depends(db)):
     return apply_decision(conn, pid, d.decision, org["id"])
 
 
+@app.get("/executor/queue", dependencies=[Depends(auth)])
+def executor_queue(conn=Depends(db)):
+    """Approved proposals, handed out once. No external system is called from here: until Gmail, Slack and
+    LinkedIn credentials exist, the executor gives the approver the final text to use by hand.
+    Handing a proposal out marks it done (at-most-once)."""
+    out = []
+    rows = conn.execute("SELECT p.*, o.telegram_id AS decider_chat, o.name AS decider FROM proposed_actions p "
+                        "JOIN organisers o ON o.id = p.decided_by "
+                        "WHERE p.status='approved' AND p.executed_at IS NULL ORDER BY p.id").fetchall()
+    for p in rows:
+        ev = host = None
+        if p["payload"].get("event_id"):
+            ev = conn.execute("SELECT * FROM events WHERE id=%s", (p["payload"]["event_id"],)).fetchone()
+            if ev and ev["host_id"]:
+                h = conn.execute("SELECT name FROM organisers WHERE id=%s", (ev["host_id"],)).fetchone()
+                host = h["name"] if h else None
+        artifact = preview.render(p["kind"], p["payload"], ev, host, final=True)
+        text = (f"Approved #{p['id']} [{p['kind']}] by {p['decider']}.\n"
+                f"Nothing was sent automatically (no sending account is connected yet). Use this:\n\n{artifact}")
+        conn.execute("UPDATE proposed_actions SET status='done', executed_at=now() WHERE id=%s", (p["id"],))
+        audit(conn, "executor", "handed_over", {"id": p["id"], "kind": p["kind"]})
+        if p["decider_chat"]:
+            out.append({"pid": p["id"], "kind": p["kind"], "chat_id": p["decider_chat"], "text": text[:4000]})
+    return out
+
+
 @app.post("/proposals/{pid}/done", dependencies=[Depends(auth)])
 def mark_done(pid: int, ok: bool = True, conn=Depends(db)):
     conn.execute("UPDATE proposed_actions SET status=%s WHERE id=%s AND status='approved'",

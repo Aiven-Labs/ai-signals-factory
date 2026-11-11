@@ -40,26 +40,29 @@ def _ctx(ev: dict, host: str | None) -> dict:
             "venue_name": (ev.get("venue") or "[venue]"), "host": host or "[host]"}
 
 
-def render(kind: str, payload: dict, ev: dict | None, host: str | None = None) -> str:
-    """Text for the Telegram message. `payload` is the proposal payload; `ev` the events row (or None)."""
+def render(kind: str, payload: dict, ev: dict | None, host: str | None = None, final: bool = False) -> str:
+    """Text for the Telegram message. `payload` is the proposal payload; `ev` the events row (or None).
+    final=True returns only the artifact itself (email body, post text, instruction), no header or footer."""
     step = payload.get("step")
     if not ev:
         return payload.get("summary", "")
     c = _ctx(ev, host)
-    head = f"{c['title']} - {c['date']} - {c['venue_name']}\n\n"
+    head = "" if final else f"{c['title']} - {c['date']} - {c['venue_name']}\n\n"
     if kind == "speaker_email":
         body = (TEMPLATES / "speaker_invite.txt").read_text()
         for k, v in {"{{ DATE }}": c["date_long"], "{{ TIME }}": "[time]", "{{ VENUE }}": c["venue_name"],
                      "{{ NAME }}": "[speaker name]", "{{ TALK_TITLE }}": "[talk title]",
                      "{{ TALK_FORMAT }}": "[full talk / lightning talk]", "{{ ORGANISER }}": c["host"]}.items():
             body = body.replace(k, v)
-        text = head + "ACTION: send this email to each speaker marked 'pitched' for this event (none recorded yet).\n\n" + body
+        text = body if final else head + "ACTION: send this email to each speaker marked 'pitched' for this event (none recorded yet).\n\n" + body
     elif kind == "public_post" and step in POSTS:
         label, tpl = POSTS[step]
-        text = head + f"ACTION: publish this {label}:\n\n" + tpl.format(**c)
+        text = tpl.format(**c) if final else head + f"ACTION: publish this {label}:\n\n" + tpl.format(**c)
     elif step in MANUAL:
-        text = head + "ACTION (done by a person, the factory does nothing automatically):\n" + MANUAL[step].format(**c)
+        text = MANUAL[step].format(**c) if final else head + "ACTION (done by a person, the factory does nothing automatically):\n" + MANUAL[step].format(**c)
     else:
         text = head + payload.get("summary", "")
+    if final:
+        return text[:LIMIT]
     text += "\n\nApprove = go-ahead recorded. Reject = skip it. Nothing is sent from here yet."
     return text[:LIMIT]

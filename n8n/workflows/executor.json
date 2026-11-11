@@ -1,0 +1,18 @@
+{
+  "name": "Executor",
+  "nodes": [
+    {"parameters": {"rule": {"interval": [{"field": "minutes", "minutesInterval": 1}]}},
+     "name": "Every minute", "type": "n8n-nodes-base.scheduleTrigger", "typeVersion": 1.2, "position": [0, 0]},
+    {"parameters": {"url": "={{$env.CORE_URL}}/executor/queue", "sendHeaders": true,
+                    "headerParameters": {"parameters": [{"name": "X-Factory-Token", "value": "={{$env.FACTORY_TOKEN}}"}]}},
+     "name": "Core /executor/queue", "type": "n8n-nodes-base.httpRequest", "typeVersion": 4.2, "position": [240, 0]},
+    {"parameters": {"chatId": "={{$json.chat_id}}", "text": "={{$json.text}}",
+                    "additionalFields": {"appendAttribution": false}},
+     "name": "Hand over to approver", "type": "n8n-nodes-base.telegram", "typeVersion": 1.2, "position": [480, 0],
+     "credentials": {"telegramApi": {"id": "__CRED_ID__", "name": "AI Signals bot"}}}
+  ],
+  "connections": {
+    "Every minute": {"main": [[{"node": "Core /executor/queue", "type": "main", "index": 0}]]},
+    "Core /executor/queue": {"main": [[{"node": "Hand over to approver", "type": "main", "index": 0}]]}
+  }
+}

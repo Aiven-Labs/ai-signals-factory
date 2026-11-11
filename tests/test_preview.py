@@ -18,3 +18,9 @@ def test_post_and_manual_previews():
 
 def test_falls_back_to_summary_without_event():
     assert preview.render("manual", {"summary": "x"}, None) == "x"
+
+
+def test_final_text_has_no_header_or_footer():
+    t = preview.render("public_post", {"step": "slack_announce"}, EV, final=True)
+    assert t.startswith("AI Signals #37 is on") and "Approve =" not in t and "ACTION" not in t
+    assert "Subject:" in preview.render("speaker_email", {"step": "speakers"}, EV, "A", final=True)
