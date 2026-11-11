@@ -1,0 +1,1 @@
+ALTER TABLE proposed_actions ADD COLUMN IF NOT EXISTS notified_at TIMESTAMPTZ;

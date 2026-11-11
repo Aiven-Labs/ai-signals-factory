@@ -46,13 +46,6 @@ def audit(conn, actor, action, detail):
                  (actor, action, json.dumps(detail)))
 
 
-def notify_organisers(conn, pid, kind, summary):
-    """Send the proposal to every active organiser whose role may decide it and who has Telegram linked."""
-    orgs = conn.execute("SELECT id, role, telegram_id FROM organisers WHERE active AND telegram_id IS NOT NULL").fetchall()
-    chats = [o["telegram_id"] for o in orgs if policy.can_decide(o["role"], kind, o["id"], None)]
-    return notify.proposal(chats, pid, kind, summary)
-
-
 def propose(conn, idem_key, kind, payload, requested_by="system"):
     row = conn.execute(
         "INSERT INTO proposed_actions(idem_key, kind, payload, requested_by) "
@@ -60,7 +53,6 @@ def propose(conn, idem_key, kind, payload, requested_by="system"):
         (idem_key, kind, json.dumps(payload), requested_by)).fetchone()
     if row:
         audit(conn, requested_by, "propose", {"id": row["id"], "kind": kind})
-        notify_organisers(conn, row["id"], kind, payload.get("summary", ""))
     return row["id"] if row else None
 
 
@@ -116,42 +108,39 @@ def decide(pid: int, d: DecisionIn, conn=Depends(db)):
     return apply_decision(conn, pid, d.decision, d.decided_by)
 
 
-@app.post("/proposals/{pid}/notify", dependencies=[Depends(auth)])
-def renotify(pid: int, conn=Depends(db)):
-    p = conn.execute("SELECT * FROM proposed_actions WHERE id=%s AND status='pending'", (pid,)).fetchone()
-    if not p:
-        raise HTTPException(404, "no such pending proposal")
-    return {"sent_to": len(notify_organisers(conn, pid, p["kind"], p["payload"].get("summary", "")))}
+@app.get("/outbox", dependencies=[Depends(auth)])
+def outbox(conn=Depends(db)):
+    """One row per (pending, not yet announced proposal, organiser who may decide it and has Telegram linked)."""
+    orgs = conn.execute("SELECT id, role, telegram_id FROM organisers WHERE active AND telegram_id IS NOT NULL").fetchall()
+    out = []
+    for p in conn.execute("SELECT * FROM proposed_actions WHERE status='pending' AND notified_at IS NULL ORDER BY id").fetchall():
+        for o in orgs:
+            if policy.can_decide(o["role"], p["kind"], o["id"], p["payload"].get("requester_id")):
+                out.append({"pid": p["id"], "kind": p["kind"], "summary": p["payload"].get("summary", ""),
+                            "chat_id": o["telegram_id"]})
+    return out
 
 
-@app.post("/telegram")
-def telegram(update: dict, x_telegram_bot_api_secret_token: str = Header(default=""), conn=Depends(db)):
-    """Telegram webhook. Only button presses from linked organisers change anything."""
-    secret = os.environ.get("TELEGRAM_WEBHOOK_SECRET")
-    if not secret or x_telegram_bot_api_secret_token != secret:
-        raise HTTPException(401, "bad secret")
-    cb = update.get("callback_query")
-    if not cb:
-        return {"ok": True}
-    who = str(cb["from"]["id"])
-    org = conn.execute("SELECT id FROM organisers WHERE telegram_id=%s AND active", (who,)).fetchone()
+@app.post("/outbox/{pid}/sent", dependencies=[Depends(auth)])
+def outbox_sent(pid: int, conn=Depends(db)):
+    conn.execute("UPDATE proposed_actions SET notified_at=now() WHERE id=%s AND notified_at IS NULL", (pid,))
+    return {"id": pid}
+
+
+class TgDecisionIn(BaseModel):
+    telegram_id: str
+    decision: str
+
+
+@app.post("/proposals/{pid}/decide_telegram", dependencies=[Depends(auth)])
+def decide_telegram(pid: int, d: TgDecisionIn, conn=Depends(db)):
+    """Called by n8n when an organiser presses a button. The decider is whoever owns that Telegram ID."""
+    if d.decision not in ("approved", "rejected"):
+        raise HTTPException(400, "decision must be approved or rejected")
+    org = conn.execute("SELECT id FROM organisers WHERE telegram_id=%s AND active", (d.telegram_id,)).fetchone()
     if not org:
-        notify.answer(cb["id"], "You are not a linked organiser.")
-        return {"ok": True}
-    action, _, pid = (cb.get("data") or "").partition(":")
-    decision = {"a": "approved", "r": "rejected"}.get(action)
-    if not decision or not pid.isdigit():
-        return {"ok": True}
-    msg = cb.get("message") or {}
-    try:
-        r = apply_decision(conn, int(pid), decision, org["id"])
-    except HTTPException as e:
-        notify.answer(cb["id"], str(e.detail))
-        return {"ok": True}
-    notify.answer(cb["id"], f"{decision.capitalize()}.")
-    if msg:
-        notify.edit(msg["chat"]["id"], msg["message_id"], f"#{pid} [{r['kind']}] {decision} by {r['by']}")
-    return {"ok": True}
+        raise HTTPException(403, "not a linked organiser")
+    return apply_decision(conn, pid, d.decision, org["id"])
 
 
 @app.post("/proposals/{pid}/done", dependencies=[Depends(auth)])
