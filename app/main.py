@@ -124,12 +124,16 @@ def outbox(conn=Depends(db)):
         for o in orgs:
             if policy.can_decide(o["role"], p["kind"], o["id"], p["payload"].get("requester_id")):
                 out.append({"pid": p["id"], "kind": p["kind"], "text": text[:4000], "chat_id": o["telegram_id"]})
+    # at-most-once: handing a proposal out marks it announced, so a flaky run can never send it twice
+    for pid in {r["pid"] for r in out}:
+        conn.execute("UPDATE proposed_actions SET notified_at=now() WHERE id=%s", (pid,))
     return out
 
 
-@app.post("/outbox/{pid}/sent", dependencies=[Depends(auth)])
-def outbox_sent(pid: int, conn=Depends(db)):
-    conn.execute("UPDATE proposed_actions SET notified_at=now() WHERE id=%s AND notified_at IS NULL", (pid,))
+@app.post("/proposals/{pid}/renotify", dependencies=[Depends(auth)])
+def renotify(pid: int, conn=Depends(db)):
+    """Announce a still-pending proposal again, e.g. if the chat message was lost."""
+    conn.execute("UPDATE proposed_actions SET notified_at=NULL WHERE id=%s AND status='pending'", (pid,))
     return {"id": pid}
 
 

@@ -1,28 +1,114 @@
 {
   "name": "Telegram outbox",
   "nodes": [
-    {"parameters": {"rule": {"interval": [{"field": "minutes", "minutesInterval": 1}]}},
-     "name": "Every minute", "type": "n8n-nodes-base.scheduleTrigger", "typeVersion": 1.2, "position": [0, 0]},
-    {"parameters": {"url": "={{$env.CORE_URL}}/outbox", "sendHeaders": true,
-                    "headerParameters": {"parameters": [{"name": "X-Factory-Token", "value": "={{$env.FACTORY_TOKEN}}"}]}},
-     "name": "Core /outbox", "type": "n8n-nodes-base.httpRequest", "typeVersion": 4.2, "position": [240, 0]},
-    {"parameters": {"chatId": "={{$json.chat_id}}",
-                    "text": "={{$json.text}}",
-                    "replyMarkup": "inlineKeyboard",
-                    "inlineKeyboard": {"rows": [{"row": {"buttons": [
-                      {"text": "Approve", "additionalFields": {"callback_data": "={{'a:' + $json.pid}}"}},
-                      {"text": "Reject", "additionalFields": {"callback_data": "={{'r:' + $json.pid}}"}}]}}]},
-                    "additionalFields": {"appendAttribution": false}},
-     "name": "Send to organiser", "type": "n8n-nodes-base.telegram", "typeVersion": 1.2, "position": [480, 0],
-     "credentials": {"telegramApi": {"id": "__CRED_ID__", "name": "AI Signals bot"}}},
-    {"parameters": {"method": "POST", "url": "={{$env.CORE_URL + '/outbox/' + $('Core /outbox').item.json.pid + '/sent'}}",
-                    "sendHeaders": true,
-                    "headerParameters": {"parameters": [{"name": "X-Factory-Token", "value": "={{$env.FACTORY_TOKEN}}"}]}},
-     "name": "Mark sent", "type": "n8n-nodes-base.httpRequest", "typeVersion": 4.2, "position": [720, 0]}
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "minutes",
+              "minutesInterval": 1
+            }
+          ]
+        }
+      },
+      "name": "Every minute",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [
+        0,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "url": "={{$env.CORE_URL}}/outbox",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "X-Factory-Token",
+              "value": "={{$env.FACTORY_TOKEN}}"
+            }
+          ]
+        }
+      },
+      "name": "Core /outbox",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        240,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "chatId": "={{$json.chat_id}}",
+        "text": "={{$json.text}}",
+        "replyMarkup": "inlineKeyboard",
+        "inlineKeyboard": {
+          "rows": [
+            {
+              "row": {
+                "buttons": [
+                  {
+                    "text": "Approve",
+                    "additionalFields": {
+                      "callback_data": "={{'a:' + $json.pid}}"
+                    }
+                  },
+                  {
+                    "text": "Reject",
+                    "additionalFields": {
+                      "callback_data": "={{'r:' + $json.pid}}"
+                    }
+                  }
+                ]
+              }
+            }
+          ]
+        },
+        "additionalFields": {
+          "appendAttribution": false
+        }
+      },
+      "name": "Send to organiser",
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.2,
+      "position": [
+        480,
+        0
+      ],
+      "credentials": {
+        "telegramApi": {
+          "id": "__CRED_ID__",
+          "name": "AI Signals bot"
+        }
+      }
+    }
   ],
   "connections": {
-    "Every minute": {"main": [[{"node": "Core /outbox", "type": "main", "index": 0}]]},
-    "Core /outbox": {"main": [[{"node": "Send to organiser", "type": "main", "index": 0}]]},
-    "Send to organiser": {"main": [[{"node": "Mark sent", "type": "main", "index": 0}]]}
+    "Every minute": {
+      "main": [
+        [
+          {
+            "node": "Core /outbox",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Core /outbox": {
+      "main": [
+        [
+          {
+            "node": "Send to organiser",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
   }
 }
