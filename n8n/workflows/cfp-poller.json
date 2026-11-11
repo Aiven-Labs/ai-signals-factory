@@ -1,25 +1,136 @@
 {
   "name": "CFP poller",
   "nodes": [
-    {"parameters": {"rule": {"interval": [{"field": "minutes", "minutesInterval": 15}]}},
-     "name": "Every 15 minutes", "type": "n8n-nodes-base.scheduleTrigger", "typeVersion": 1.2, "position": [0, 0]},
-    {"parameters": {"resource": "sheet", "operation": "read",
-                    "documentId": {"__rl": true, "value": "1W2nIemsnObM-cYHHw_vkuTGJDcjkdBlV-j6ahwz8Nvs", "mode": "id"},
-                    "sheetName": {"__rl": true, "value": "Responses", "mode": "name"}, "options": {}},
-     "name": "Read CFP sheet", "type": "n8n-nodes-base.googleSheets", "typeVersion": 4.5, "position": [240, 0],
-     "credentials": {"googleSheetsOAuth2Api": {"id": "FrOP3Wjh3R8UvVjr", "name": "AI Signals Sheets"}}},
-    {"parameters": {"jsCode": "return $input.all().filter(i => !String(i.json['Status'] || '').trim() && String(i.json['email'] || '').includes('@'));"},
-     "name": "Unreviewed rows only", "type": "n8n-nodes-base.code", "typeVersion": 2, "position": [480, 0]},
-    {"parameters": {"method": "POST", "url": "={{$env.CORE_URL}}/cfp", "sendHeaders": true,
-                    "headerParameters": {"parameters": [{"name": "X-Factory-Token", "value": "={{$env.FACTORY_TOKEN}}"}]},
-                    "sendBody": true, "specifyBody": "json",
-                    "jsonBody": "={{ JSON.stringify({submitted: $json['submitted on'], email: $json['email'], name: $json['name'] || '', title: $json['talk title'] || '', message: $json['your message'] || '', status: $json['Status'] || ''}) }}",
-                    "options": {"response": {"response": {"neverError": true}}}},
-     "name": "Core /cfp", "type": "n8n-nodes-base.httpRequest", "typeVersion": 4.2, "position": [720, 0]}
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "minutes",
+              "minutesInterval": 15
+            }
+          ]
+        }
+      },
+      "name": "Every 15 minutes",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [
+        0,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "resource": "sheet",
+        "operation": "read",
+        "documentId": {
+          "__rl": true,
+          "value": "1W2nIemsnObM-cYHHw_vkuTGJDcjkdBlV-j6ahwz8Nvs",
+          "mode": "id"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "Responses",
+          "mode": "name"
+        },
+        "options": {}
+      },
+      "name": "Read CFP sheet",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [
+        240,
+        0
+      ],
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "FrOP3Wjh3R8UvVjr",
+          "name": "AI Signals Sheets"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "return $input.all().filter(i => !String(i.json['Status'] || '').trim() && String(i.json['email'] || '').includes('@'));"
+      },
+      "name": "Unreviewed rows only",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        480,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{$env.CORE_URL}}/cfp",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "X-Factory-Token",
+              "value": "={{$env.FACTORY_TOKEN}}"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({submitted: $json['submitted on'], email: $json['email'], name: $json['name'] || '', title: $json['talk title'] || '', message: $json['your message'] || '', status: $json['Status'] || ''}) }}",
+        "options": {
+          "response": {
+            "response": {
+              "neverError": true
+            }
+          }
+        }
+      },
+      "name": "Core /cfp",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        720,
+        0
+      ],
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 3000
+    }
   ],
   "connections": {
-    "Every 15 minutes": {"main": [[{"node": "Read CFP sheet", "type": "main", "index": 0}]]},
-    "Read CFP sheet": {"main": [[{"node": "Unreviewed rows only", "type": "main", "index": 0}]]},
-    "Unreviewed rows only": {"main": [[{"node": "Core /cfp", "type": "main", "index": 0}]]}
+    "Every 15 minutes": {
+      "main": [
+        [
+          {
+            "node": "Read CFP sheet",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Read CFP sheet": {
+      "main": [
+        [
+          {
+            "node": "Unreviewed rows only",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Unreviewed rows only": {
+      "main": [
+        [
+          {
+            "node": "Core /cfp",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
   }
 }
