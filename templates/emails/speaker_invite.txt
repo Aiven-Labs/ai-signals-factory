@@ -2,9 +2,10 @@ Subject: Speaking at AI Signals on {{ DATE }} - we'd love to have you!
 
 Hi {{ NAME }},
 
-Thank you for submitting "{{ TALK_TITLE }}" to AI Signals. We'd love to have you speak at our event on {{ DATE }}{{ TIME }}.
+Thank you for submitting "{{ TALK_TITLE }}" to AI Signals. We'd love to have you speak at our event on {{ DATE }}.
 
 Venue: {{ VENUE }}
+Schedule: {{ SCHEDULE }}
 Format: {{ TALK_FORMAT }}
 
 Best regards,

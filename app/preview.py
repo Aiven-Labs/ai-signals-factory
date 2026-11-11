@@ -28,18 +28,37 @@ MANUAL = {
 }
 
 POSTS = {
-    "linkedin_announce": ("LinkedIn post (draft)", "{title} is on {date_long}{at_time} at {venue_full}.\n\n"
+    "linkedin_announce": ("LinkedIn post (draft)", "{title} is on {date_long} at {venue_full}.\n{schedule}\n\n"
                           "Speakers to be announced.\n\nRegister: {luma}\n\n#AI #London #meetup"),
-    "slack_announce": ("Slack #general message (draft)", "{title} is on {date_long}{at_time} at {venue_full}. "
+    "slack_announce": ("Slack #general message (draft)", "{title} is on {date_long} at {venue_full}. {schedule} "
                        "Register: {luma}. Reply here if you want to speak."),
     "reminder_2w": ("Reminder post for Meetup, Luma newsletter, Slack and LinkedIn (draft)",
-                    "Two weeks to go: {title} on {date_long}{at_time} at {venue_full}. Register: {luma}."),
+                    "Two weeks to go: {title} on {date_long} at {venue_full}. {schedule} Register: {luma}."),
     "reminder_24h": ("Reminder post for Meetup, Luma newsletter, Slack and LinkedIn (draft)",
-                     "Tomorrow: {title} at {venue_full}{at_time}. See you there! {luma}"),
+                     "Tomorrow: {title} at {venue_full}. {schedule} See you there! {luma}"),
     "thanks": ("Thank-you post for Meetup, Luma newsletter and LinkedIn (draft)",
                "Thank you to our speakers and everyone who came to {title}. "
                "Slides and the recording will follow."),
 }
+
+
+def _t(hhmm: str) -> str:
+    """'18:30' -> '6:30pm', '18:00' -> '6pm'."""
+    h, m = (int(x) for x in hhmm.split(":")[:2])
+    return f"{h % 12 or 12}{':%02d' % m if m else ''}{'pm' if h >= 12 else 'am'}"
+
+
+def _schedule(ev: dict) -> str:
+    parts = []
+    if ev.get("start_time"):
+        parts.append(f"doors open at {_t(ev['start_time'])}")
+    if ev.get("talks_start"):
+        parts.append(f"talks start at {_t(ev['talks_start'])}")
+    if ev.get("end_time"):
+        parts.append(f"we finish by {_t(ev['end_time'])}")
+    if not parts:
+        return ""
+    return (", ".join(parts[:-1]) + (" and " if len(parts) > 1 else "") + parts[-1]).capitalize() + "."
 
 
 def _ctx(ev: dict, host: str | None) -> dict:
@@ -48,7 +67,7 @@ def _ctx(ev: dict, host: str | None) -> dict:
     addr = (ev.get("venue_address") or "").strip()
     return {"title": ev["title"], "date": d.strftime("%-d %b %Y"), "date_long": d.strftime("%A %-d %B %Y"),
             "venue_name": venue, "venue_full": f"{venue}, {addr}" if addr else venue,
-            "at_time": f" at {ev['start_time']}" if ev.get("start_time") else "",
+            "at_time": "", "schedule": _schedule(ev),
             "luma": ev.get("luma_url") or "(Luma link to follow)", "host": host or "the AI Signals team"}
 
 
@@ -56,7 +75,7 @@ def _invite(name, title, ev, host, fmt=None, template="speaker_invite"):
     """Speaker email from a template: returns (subject, body)."""
     c = _ctx(ev, host)
     raw = (TEMPLATES / f"{template}.txt").read_text().replace("{{ TIME }}", c["at_time"])
-    for k, v in {"{{ DATE }}": c["date_long"], "{{ VENUE }}": c["venue_full"],
+    for k, v in {"{{ DATE }}": c["date_long"], "{{ VENUE }}": c["venue_full"], "{{ SCHEDULE }}": c["schedule"],
                  "{{ NAME }}": name or "[speaker name]", "{{ TALK_TITLE }}": title or "[talk title]",
                  "{{ TALK_FORMAT }}": FORMATS.get(fmt, FORMATS[None]), "{{ ORGANISER }}": c["host"]}.items():
         raw = raw.replace(k, v)
@@ -110,7 +129,7 @@ def render(kind: str, payload: dict, ev: dict | None, host: str | None = None, f
                 f"invitation email to approve before anything is sent. Reject = skip.")[:LIMIT]
     if kind == "speaker_email":
         body = (TEMPLATES / "speaker_invite.txt").read_text().replace("{{ TIME }}", c["at_time"])
-        for k, v in {"{{ DATE }}": c["date_long"], "{{ VENUE }}": c["venue_full"], "{{ NAME }}": "[speaker name]",
+        for k, v in {"{{ DATE }}": c["date_long"], "{{ VENUE }}": c["venue_full"], "{{ SCHEDULE }}": c["schedule"], "{{ NAME }}": "[speaker name]",
                      "{{ TALK_TITLE }}": "[talk title]", "{{ TALK_FORMAT }}": FORMATS[None],
                      "{{ ORGANISER }}": c["host"]}.items():
             body = body.replace(k, v)
