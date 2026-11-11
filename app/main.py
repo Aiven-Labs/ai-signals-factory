@@ -13,7 +13,7 @@ from psycopg.rows import dict_row
 from pydantic import BaseModel
 
 from . import classify as clf
-from . import notify, policy, preview
+from . import notify, policy, preview, slots
 from .schedule import STEPS, due_steps
 
 app = FastAPI(title="Meetup factory core")
@@ -91,6 +91,12 @@ class DecisionIn(BaseModel):
     decided_by: int          # organisers.id
 
 
+def slot_counts(conn, event_id) -> dict:
+    rows = conn.execute("SELECT format, count(*) AS n FROM event_speakers WHERE event_id=%s AND state = ANY(%s) "
+                        "AND format IS NOT NULL GROUP BY format", (event_id, list(slots.HOLDING))).fetchall()
+    return {r["format"]: r["n"] for r in rows}
+
+
 def apply_decision(conn, pid: int, decision: str, organiser_id: int, variant: str | None = None):
     org = conn.execute("SELECT * FROM organisers WHERE id=%s AND active", (organiser_id,)).fetchone()
     prop = conn.execute("SELECT * FROM proposed_actions WHERE id=%s FOR UPDATE", (pid,)).fetchone()
@@ -103,11 +109,22 @@ def apply_decision(conn, pid: int, decision: str, organiser_id: int, variant: st
         audit(conn, org["name"], "decide_denied", {"id": pid, "kind": prop["kind"]})
         conn.commit()
         raise HTTPException(403, "role not allowed to decide this")
+    if decision == "approved" and prop["kind"] == "cfp_review":
+        if variant not in slots.FORMATS:
+            raise HTTPException(422, "Pick Main talk or Lightning talk to approve a talk proposal")
+        counts = slot_counts(conn, prop["event_id"])
+        if not slots.can_invite(counts, variant):
+            raise HTTPException(409, f"No {variant} slot left ({slots.describe(counts)}). Decline someone first.")
     conn.execute("UPDATE proposed_actions SET status=%s, decided_by=%s, decided_at=now() WHERE id=%s",
                  (decision, org["id"], pid))
     if decision == "approved" and variant in ("main", "lightning"):
         conn.execute("UPDATE proposed_actions SET payload = payload || %s::jsonb WHERE id=%s",
                      (json.dumps({"format": variant}), pid))
+        if prop["kind"] == "cfp_review":
+            conn.execute("INSERT INTO event_speakers(event_id, speaker_id, talk_title, state, format) "
+                         "VALUES (%s,%s,%s,'invited',%s) ON CONFLICT (event_id, speaker_id) "
+                         "DO UPDATE SET state='invited', format=EXCLUDED.format, talk_title=EXCLUDED.talk_title, updated_at=now()",
+                         (prop["event_id"], prop["payload"].get("speaker_id"), prop["payload"].get("title"), variant))
     audit(conn, org["name"], decision, {"id": pid, "variant": variant})
     return {"id": pid, "status": decision, "by": org["name"], "kind": prop["kind"], "variant": variant}
 
@@ -183,6 +200,30 @@ def next_event(conn):
                         "ORDER BY event_date LIMIT 1", (date.today(),)).fetchone()
 
 
+class SpeakerStateIn(BaseModel):
+    state: str          # invited | confirmed | declined | spoke
+
+
+@app.post("/events/{event_id}/speakers/{speaker_id}/state", dependencies=[Depends(auth)])
+def set_speaker_state(event_id: int, speaker_id: int, b: SpeakerStateIn, conn=Depends(db)):
+    """Move a speaker through invited -> confirmed / declined / spoke. Declined and spoke free their slot."""
+    if b.state not in ("invited", "confirmed", "declined", "spoke"):
+        raise HTTPException(400, "state must be invited, confirmed, declined or spoke")
+    r = conn.execute("UPDATE event_speakers SET state=%s, updated_at=now() WHERE event_id=%s AND speaker_id=%s "
+                     "RETURNING format", (b.state, event_id, speaker_id)).fetchone()
+    if not r:
+        raise HTTPException(404, "that speaker is not invited to that event")
+    audit(conn, "api", "speaker_state", {"event_id": event_id, "speaker_id": speaker_id, "state": b.state})
+    return {"event_id": event_id, "speaker_id": speaker_id, "state": b.state, "slots": slots.describe(slot_counts(conn, event_id))}
+
+
+@app.get("/events/{event_id}/speakers", dependencies=[Depends(auth)])
+def event_speakers(event_id: int, conn=Depends(db)):
+    rows = conn.execute("SELECT s.id AS speaker_id, s.name, es.state, es.format, es.talk_title FROM event_speakers es "
+                        "JOIN speakers s ON s.id=es.speaker_id WHERE es.event_id=%s ORDER BY es.format, s.name", (event_id,)).fetchall()
+    return {"slots": slots.describe(slot_counts(conn, event_id)), "speakers": rows}
+
+
 @app.get("/outbox", dependencies=[Depends(auth)])
 def outbox(conn=Depends(db)):
     """One row per (pending, not yet announced proposal, organiser who may decide it and has Telegram linked)."""
@@ -191,6 +232,8 @@ def outbox(conn=Depends(db)):
     for p in conn.execute("SELECT * FROM proposed_actions WHERE status='pending' AND notified_at IS NULL ORDER BY id").fetchall():
         ev, host = event_ctx(conn, p["event_id"])
         text = f"Approval needed #{p['id']} [{p['kind']}]\n\n" + preview.render(p["kind"], p["payload"], ev, host)
+        if p["kind"] == "cfp_review":
+            text += f"\nSlots held now for this event: {slots.describe(slot_counts(conn, p['event_id']))}"
         for o in orgs:
             if policy.can_decide(o["role"], p["kind"], o["id"], p["payload"].get("requester_id")):
                 out.append({"pid": p["id"], "kind": p["kind"], "text": text[:4000], "chat_id": o["telegram_id"]})
@@ -284,7 +327,9 @@ def tick(today: date | None = None, conn=Depends(db)):
         done = {r["idem_key"].split(":")[-1] for r in conn.execute(
             "SELECT idem_key FROM proposed_actions WHERE idem_key LIKE %s AND status IN ('done','rejected')",
             (f"step:{ev['id']}:%",)).fetchall()}
-        for s in due_steps(ev["event_date"], today, done):
+        confirmed = conn.execute("SELECT count(*) AS n FROM event_speakers WHERE event_id=%s AND state='confirmed'",
+                                 (ev["id"],)).fetchone()["n"]
+        for s in due_steps(ev["event_date"], today, done, confirmed):
             if propose(conn, f"step:{ev['id']}:{s.key}", s.kind,
                        {"summary": f"{ev['title']}: {s.title}", "event_id": ev["id"], "step": s.key}, event_id=ev["id"]):
                 created += 1

@@ -45,3 +45,22 @@ def test_event_bound_kinds_require_an_event():
     assert {"manual", "speaker_email", "public_post", "cfp_review"} <= EVENT_KINDS
     with pytest.raises(HTTPException):
         propose(None, "k", "manual", {})
+
+
+def test_announcements_wait_for_a_confirmed_speaker():
+    from datetime import date
+    from app.schedule import due_steps
+    d, today = date(2026, 12, 8), date(2026, 11, 11)
+    waiting = {s.key for s in due_steps(d, today, confirmed_speakers=0)}
+    assert not ({"meetup", "luma", "linkedin_announce"} & waiting)
+    assert {"venue", "speakers", "website", "slack_announce"} <= waiting
+    ready = {s.key for s in due_steps(d, today, confirmed_speakers=1)}
+    assert {"meetup", "luma", "linkedin_announce"} <= ready
+
+
+def test_speaker_slot_limits():
+    from app.slots import can_invite, describe
+    lim = {"main": 2, "lightning": 2}
+    assert can_invite({"main": 1}, "main", lim) and not can_invite({"main": 2}, "main", lim)
+    assert can_invite({"main": 2}, "lightning", lim) and not can_invite({}, "keynote", lim)
+    assert describe({"main": 2, "lightning": 1}, lim) == "main 2/2, lightning 1/2"

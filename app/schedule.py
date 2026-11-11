@@ -35,8 +35,16 @@ def due_date(event_date: date, step: Step) -> date:
     return event_date - timedelta(days=step.days_before)
 
 
-def due_steps(event_date: date, today: date, done: set[str] | None = None) -> list[Step]:
-    """Steps whose due date has arrived and that are not done, oldest first."""
+# The event must not be advertised or listed anywhere until at least this many speakers have confirmed.
+GATED_STEPS = {"meetup", "luma", "linkedin_announce"}
+MIN_CONFIRMED_SPEAKERS = 1
+
+
+def due_steps(event_date: date, today: date, done: set[str] | None = None,
+              confirmed_speakers: int | None = None) -> list[Step]:
+    """Steps whose due date has arrived and that are not done, oldest first.
+    When confirmed_speakers is given, gated steps wait until enough speakers have confirmed."""
     done = done or set()
-    out = [s for s in STEPS if s.key not in done and due_date(event_date, s) <= today]
+    blocked = GATED_STEPS if (confirmed_speakers is not None and confirmed_speakers < MIN_CONFIRMED_SPEAKERS) else set()
+    out = [s for s in STEPS if s.key not in done and s.key not in blocked and due_date(event_date, s) <= today]
     return sorted(out, key=lambda s: due_date(event_date, s))
