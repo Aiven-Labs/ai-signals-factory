@@ -43,6 +43,87 @@
     },
     {
       "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "typeValidation": "loose",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "is-cfp",
+              "leftValue": "={{$json.kind}}",
+              "rightValue": "cfp_review",
+              "operator": {
+                "type": "string",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        }
+      },
+      "name": "Talk proposal?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        480,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "chatId": "={{$json.chat_id}}",
+        "text": "={{$json.text}}",
+        "replyMarkup": "inlineKeyboard",
+        "inlineKeyboard": {
+          "rows": [
+            {
+              "row": {
+                "buttons": [
+                  {
+                    "text": "Main talk",
+                    "additionalFields": {
+                      "callback_data": "={{'m:' + $json.pid}}"
+                    }
+                  },
+                  {
+                    "text": "Lightning talk",
+                    "additionalFields": {
+                      "callback_data": "={{'l:' + $json.pid}}"
+                    }
+                  },
+                  {
+                    "text": "Reject",
+                    "additionalFields": {
+                      "callback_data": "={{'r:' + $json.pid}}"
+                    }
+                  }
+                ]
+              }
+            }
+          ]
+        },
+        "additionalFields": {
+          "appendAttribution": false
+        }
+      },
+      "name": "Send talk proposal",
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.2,
+      "position": [
+        720,
+        -100
+      ],
+      "credentials": {
+        "telegramApi": {
+          "id": "__CRED_ID__",
+          "name": "AI Signals bot"
+        }
+      }
+    },
+    {
+      "parameters": {
         "chatId": "={{$json.chat_id}}",
         "text": "={{$json.text}}",
         "replyMarkup": "inlineKeyboard",
@@ -76,8 +157,8 @@
       "type": "n8n-nodes-base.telegram",
       "typeVersion": 1.2,
       "position": [
-        480,
-        0
+        720,
+        100
       ],
       "credentials": {
         "telegramApi": {
@@ -101,6 +182,24 @@
     },
     "Core /outbox": {
       "main": [
+        [
+          {
+            "node": "Talk proposal?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Talk proposal?": {
+      "main": [
+        [
+          {
+            "node": "Send talk proposal",
+            "type": "main",
+            "index": 0
+          }
+        ],
         [
           {
             "node": "Send to organiser",

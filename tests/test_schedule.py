@@ -36,3 +36,12 @@ def test_parse_submitted_formats():
     assert parse_submitted("10/16/2025 14:00:07").year == 2025
     assert parse_submitted(46000.45237).year == 2025
     assert parse_submitted("garbage") is None
+
+
+def test_event_bound_kinds_require_an_event():
+    import pytest
+    from fastapi import HTTPException
+    from app.main import EVENT_KINDS, propose
+    assert {"manual", "speaker_email", "public_post", "cfp_review"} <= EVENT_KINDS
+    with pytest.raises(HTTPException):
+        propose(None, "k", "manual", {})

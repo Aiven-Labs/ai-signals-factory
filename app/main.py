@@ -46,11 +46,16 @@ def audit(conn, actor, action, detail):
                  (actor, action, json.dumps(detail)))
 
 
-def propose(conn, idem_key, kind, payload, requested_by="system"):
+EVENT_KINDS = {"manual", "speaker_email", "public_post", "reminder", "cfp_review"}
+
+
+def propose(conn, idem_key, kind, payload, requested_by="system", event_id=None):
+    if kind in EVENT_KINDS and not event_id:
+        raise HTTPException(422, f"{kind} proposals must belong to an event (event_id)")
     row = conn.execute(
-        "INSERT INTO proposed_actions(idem_key, kind, payload, requested_by) "
-        "VALUES (%s,%s,%s,%s) ON CONFLICT (idem_key) DO NOTHING RETURNING id",
-        (idem_key, kind, json.dumps(payload), requested_by)).fetchone()
+        "INSERT INTO proposed_actions(idem_key, kind, payload, requested_by, event_id) "
+        "VALUES (%s,%s,%s,%s,%s) ON CONFLICT (idem_key) DO NOTHING RETURNING id",
+        (idem_key, kind, json.dumps(payload), requested_by, event_id)).fetchone()
     if row:
         audit(conn, requested_by, "propose", {"id": row["id"], "kind": kind})
     return row["id"] if row else None
@@ -66,11 +71,14 @@ class ProposalIn(BaseModel):
     kind: str
     payload: dict = {}
     requested_by: str = "system"
+    event_id: int | None = None
 
 
 @app.post("/proposals", dependencies=[Depends(auth)])
 def create_proposal(p: ProposalIn, conn=Depends(db)):
-    return {"id": propose(conn, p.idem_key, p.kind, p.payload, p.requested_by)}
+    if p.event_id and not conn.execute("SELECT 1 FROM events WHERE id=%s", (p.event_id,)).fetchone():
+        raise HTTPException(404, "unknown event")
+    return {"id": propose(conn, p.idem_key, p.kind, p.payload, p.requested_by, p.event_id)}
 
 
 @app.get("/proposals", dependencies=[Depends(auth)])
@@ -83,7 +91,7 @@ class DecisionIn(BaseModel):
     decided_by: int          # organisers.id
 
 
-def apply_decision(conn, pid: int, decision: str, organiser_id: int):
+def apply_decision(conn, pid: int, decision: str, organiser_id: int, variant: str | None = None):
     org = conn.execute("SELECT * FROM organisers WHERE id=%s AND active", (organiser_id,)).fetchone()
     prop = conn.execute("SELECT * FROM proposed_actions WHERE id=%s FOR UPDATE", (pid,)).fetchone()
     if not org or not prop:
@@ -97,8 +105,11 @@ def apply_decision(conn, pid: int, decision: str, organiser_id: int):
         raise HTTPException(403, "role not allowed to decide this")
     conn.execute("UPDATE proposed_actions SET status=%s, decided_by=%s, decided_at=now() WHERE id=%s",
                  (decision, org["id"], pid))
-    audit(conn, org["name"], decision, {"id": pid})
-    return {"id": pid, "status": decision, "by": org["name"], "kind": prop["kind"]}
+    if decision == "approved" and variant in ("main", "lightning"):
+        conn.execute("UPDATE proposed_actions SET payload = payload || %s::jsonb WHERE id=%s",
+                     (json.dumps({"format": variant}), pid))
+    audit(conn, org["name"], decision, {"id": pid, "variant": variant})
+    return {"id": pid, "status": decision, "by": org["name"], "kind": prop["kind"], "variant": variant}
 
 
 @app.post("/proposals/{pid}/decide", dependencies=[Depends(auth)])
@@ -143,14 +154,28 @@ def cfp(r: CfpIn, conn=Depends(db)):
         return {"skipped": "unreadable timestamp"}
     if datetime.now() - when > timedelta(days=max_age):
         return {"skipped": "too old"}
+    ev = next_event(conn)
+    if not ev:
+        return {"skipped": "no upcoming event to attach this to"}
     email = r.email.strip().lower()
     sp = conn.execute("INSERT INTO speakers(name, email, source_row) VALUES (%s,%s,%s) "
                       "ON CONFLICT (email) DO UPDATE SET name=EXCLUDED.name RETURNING id",
                       (r.name.strip() or email, email, str(r.submitted))).fetchone()
     pid = propose(conn, f"cfp:{email}:{r.submitted}", "cfp_review",
                   {"summary": f"Talk proposal from {r.name or email}: {r.title}", "speaker_id": sp["id"],
-                   "email": email, "name": r.name.strip(), "title": r.title.strip(), "message": r.message.strip()[:2000]})
+                   "email": email, "name": r.name.strip(), "title": r.title.strip(), "message": r.message.strip()[:2000],
+                   "event_id": ev["id"]}, event_id=ev["id"])
     return {"proposal": pid, "duplicate": pid is None}
+
+
+def event_ctx(conn, event_id):
+    """The event row and its host's name, for building previews and drafts."""
+    ev = conn.execute("SELECT * FROM events WHERE id=%s", (event_id,)).fetchone() if event_id else None
+    host = None
+    if ev and ev["host_id"]:
+        h = conn.execute("SELECT name FROM organisers WHERE id=%s", (ev["host_id"],)).fetchone()
+        host = h["name"] if h else None
+    return ev, host
 
 
 def next_event(conn):
@@ -164,12 +189,7 @@ def outbox(conn=Depends(db)):
     orgs = conn.execute("SELECT id, role, telegram_id FROM organisers WHERE active AND telegram_id IS NOT NULL").fetchall()
     out = []
     for p in conn.execute("SELECT * FROM proposed_actions WHERE status='pending' AND notified_at IS NULL ORDER BY id").fetchall():
-        ev = host = None
-        if p["payload"].get("event_id"):
-            ev = conn.execute("SELECT * FROM events WHERE id=%s", (p["payload"]["event_id"],)).fetchone()
-            if ev and ev["host_id"]:
-                h = conn.execute("SELECT name FROM organisers WHERE id=%s", (ev["host_id"],)).fetchone()
-                host = h["name"] if h else None
+        ev, host = event_ctx(conn, p["event_id"])
         text = f"Approval needed #{p['id']} [{p['kind']}]\n\n" + preview.render(p["kind"], p["payload"], ev, host)
         for o in orgs:
             if policy.can_decide(o["role"], p["kind"], o["id"], p["payload"].get("requester_id")):
@@ -190,6 +210,7 @@ def renotify(pid: int, conn=Depends(db)):
 class TgDecisionIn(BaseModel):
     telegram_id: str
     decision: str
+    variant: str | None = None
 
 
 @app.post("/proposals/{pid}/decide_telegram", dependencies=[Depends(auth)])
@@ -200,7 +221,7 @@ def decide_telegram(pid: int, d: TgDecisionIn, conn=Depends(db)):
     org = conn.execute("SELECT id FROM organisers WHERE telegram_id=%s AND active", (d.telegram_id,)).fetchone()
     if not org:
         raise HTTPException(403, "not a linked organiser")
-    return apply_decision(conn, pid, d.decision, org["id"])
+    return apply_decision(conn, pid, d.decision, org["id"], d.variant)
 
 
 @app.get("/executor/queue", dependencies=[Depends(auth)])
@@ -213,18 +234,7 @@ def executor_queue(conn=Depends(db)):
                         "JOIN organisers o ON o.id = p.decided_by "
                         "WHERE p.status='approved' AND p.executed_at IS NULL ORDER BY p.id").fetchall()
     for p in rows:
-        ev = host = None
-        if p["payload"].get("event_id"):
-            ev = conn.execute("SELECT * FROM events WHERE id=%s", (p["payload"]["event_id"],)).fetchone()
-            if ev and ev["host_id"]:
-                h = conn.execute("SELECT name FROM organisers WHERE id=%s", (ev["host_id"],)).fetchone()
-                host = h["name"] if h else None
-        if p["kind"] == "cfp_review":
-            ev = next_event(conn)
-            host = None
-            if ev and ev["host_id"]:
-                h = conn.execute("SELECT name FROM organisers WHERE id=%s", (ev["host_id"],)).fetchone()
-                host = h["name"] if h else None
+        ev, host = event_ctx(conn, p["event_id"])
         artifact = preview.render(p["kind"], p["payload"], ev, host, final=True)
         draft = preview.draft(p["kind"], p["payload"], ev, host)
         note = ("A Gmail draft is being created in Drafts (NOT sent). Check and send it yourself."
@@ -260,7 +270,8 @@ def inbound(m: InboundIn, conn=Depends(db)):
     if by == "human" or intent in ("sponsor_enquiry", "speaker_pitch"):
         kind = "escalation"
         propose(conn, f"inbound:{m.channel}:{m.sender}:{hashlib.sha1(m.body.encode()).hexdigest()[:12]}", kind,
-                {"summary": f"{intent} from {m.sender}: {m.body[:200]}", "intent": intent})
+                {"summary": f"{intent} from {m.sender}: {m.body[:200]}", "intent": intent},
+                event_id=(next_event(conn) or {}).get("id"))
     return {"intent": intent, "handled_by": by}
 
 
@@ -275,7 +286,7 @@ def tick(today: date | None = None, conn=Depends(db)):
             (f"step:{ev['id']}:%",)).fetchall()}
         for s in due_steps(ev["event_date"], today, done):
             if propose(conn, f"step:{ev['id']}:{s.key}", s.kind,
-                       {"summary": f"{ev['title']}: {s.title}", "event_id": ev["id"], "step": s.key}):
+                       {"summary": f"{ev['title']}: {s.title}", "event_id": ev["id"], "step": s.key}, event_id=ev["id"]):
                 created += 1
     return {"created": created, "steps_defined": len(STEPS)}
 
