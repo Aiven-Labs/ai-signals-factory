@@ -1,0 +1,39 @@
+{
+  "name": "Telegram decisions",
+  "nodes": [
+    {"parameters": {"updates": ["callback_query"], "additionalFields": {}},
+     "name": "Button pressed", "type": "n8n-nodes-base.telegramTrigger", "typeVersion": 1.2, "position": [0, 0],
+     "credentials": {"telegramApi": {"id": "__CRED_ID__", "name": "AI Signals bot"}}},
+    {"parameters": {"method": "POST",
+                    "url": "={{$env.CORE_URL + '/proposals/' + $json.callback_query.data.split(':')[1] + '/decide_telegram'}}",
+                    "sendHeaders": true,
+                    "headerParameters": {"parameters": [{"name": "X-Factory-Token", "value": "={{$env.FACTORY_TOKEN}}"}]},
+                    "sendBody": true, "specifyBody": "json",
+                    "jsonBody": "={{ JSON.stringify({telegram_id: String($json.callback_query.from.id), decision: $json.callback_query.data.startsWith('a:') ? 'approved' : 'rejected'}) }}",
+                    "options": {"response": {"response": {"neverError": true}}}},
+     "name": "Core decide", "type": "n8n-nodes-base.httpRequest", "typeVersion": 4.2, "position": [240, 0]},
+    {"parameters": {"resource": "callback", "operation": "answerQuery",
+                    "queryId": "={{$('Button pressed').item.json.callback_query.id}}",
+                    "additionalFields": {"text": "={{ $json.status ? ($json.status + '.') : String($json.detail || 'failed') }}"}},
+     "name": "Answer button", "type": "n8n-nodes-base.telegram", "typeVersion": 1.2, "position": [480, 0],
+     "credentials": {"telegramApi": {"id": "__CRED_ID__", "name": "AI Signals bot"}}},
+    {"parameters": {"conditions": {"options": {"caseSensitive": true, "typeValidation": "loose", "version": 2},
+                    "conditions": [{"id": "ok", "leftValue": "={{$('Core decide').item.json.status}}", "rightValue": "",
+                                    "operator": {"type": "string", "operation": "exists", "singleValue": true}}],
+                    "combinator": "and"}},
+     "name": "Decision applied?", "type": "n8n-nodes-base.if", "typeVersion": 2.2, "position": [720, 0]},
+    {"parameters": {"operation": "editMessageText",
+                    "chatId": "={{$('Button pressed').item.json.callback_query.message.chat.id}}",
+                    "messageId": "={{$('Button pressed').item.json.callback_query.message.message_id}}",
+                    "text": "=#{{$('Core decide').item.json.id}} [{{$('Core decide').item.json.kind}}] {{$('Core decide').item.json.status}} by {{$('Core decide').item.json.by}}",
+                    "additionalFields": {}},
+     "name": "Update message", "type": "n8n-nodes-base.telegram", "typeVersion": 1.2, "position": [960, 0],
+     "credentials": {"telegramApi": {"id": "__CRED_ID__", "name": "AI Signals bot"}}}
+  ],
+  "connections": {
+    "Button pressed": {"main": [[{"node": "Core decide", "type": "main", "index": 0}]]},
+    "Core decide": {"main": [[{"node": "Answer button", "type": "main", "index": 0}]]},
+    "Answer button": {"main": [[{"node": "Decision applied?", "type": "main", "index": 0}]]},
+    "Decision applied?": {"main": [[{"node": "Update message", "type": "main", "index": 0}], []]}
+  }
+}

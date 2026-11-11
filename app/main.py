@@ -13,7 +13,7 @@ from psycopg.rows import dict_row
 from pydantic import BaseModel
 
 from . import classify as clf
-from . import notify, policy
+from . import notify, policy, preview
 from .schedule import STEPS, due_steps
 
 app = FastAPI(title="Meetup factory core")
@@ -114,10 +114,16 @@ def outbox(conn=Depends(db)):
     orgs = conn.execute("SELECT id, role, telegram_id FROM organisers WHERE active AND telegram_id IS NOT NULL").fetchall()
     out = []
     for p in conn.execute("SELECT * FROM proposed_actions WHERE status='pending' AND notified_at IS NULL ORDER BY id").fetchall():
+        ev = host = None
+        if p["payload"].get("event_id"):
+            ev = conn.execute("SELECT * FROM events WHERE id=%s", (p["payload"]["event_id"],)).fetchone()
+            if ev and ev["host_id"]:
+                h = conn.execute("SELECT name FROM organisers WHERE id=%s", (ev["host_id"],)).fetchone()
+                host = h["name"] if h else None
+        text = f"Approval needed #{p['id']} [{p['kind']}]\n\n" + preview.render(p["kind"], p["payload"], ev, host)
         for o in orgs:
             if policy.can_decide(o["role"], p["kind"], o["id"], p["payload"].get("requester_id")):
-                out.append({"pid": p["id"], "kind": p["kind"], "summary": p["payload"].get("summary", ""),
-                            "chat_id": o["telegram_id"]})
+                out.append({"pid": p["id"], "kind": p["kind"], "text": text[:4000], "chat_id": o["telegram_id"]})
     return out
 
 
