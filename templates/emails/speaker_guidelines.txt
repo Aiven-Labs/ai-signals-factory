@@ -7,5 +7,5 @@ Full talks: 30 minutes including Q&A. Lightning talks: strictly 5 minutes.
 All events follow the NumFOCUS code of conduct: https://numfocus.org/code-of-conduct
 Please register at {{ LUMA_LINK }} and share your slides before or after the event if you can.
 
-{{ ORGANISER }}
-AI Signals Team
+The AI Signals organiser bot
+(on behalf of the AI Signals organisers)

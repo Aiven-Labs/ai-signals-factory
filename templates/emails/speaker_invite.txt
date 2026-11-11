@@ -10,5 +10,5 @@ Format: {{ TALK_FORMAT }}
 Could you let us know within 5 days whether you can make it? We have a small number of slots, so if we don't hear back we may offer yours to another speaker.
 
 Best regards,
-{{ ORGANISER }}
-AI Signals Team
+The AI Signals organiser bot
+(on behalf of the AI Signals organisers)

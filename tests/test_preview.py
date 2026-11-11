@@ -8,7 +8,7 @@ EV = {"title": "AI Signals #37", "event_date": date(2026, 12, 8), "venue": "Tess
 def test_speaker_email_proposal_shows_template_with_event_details():
     t = preview.render("speaker_email", {"step": "speakers"}, EV, "Alper")
     assert "Subject: Speaking at AI Signals on Tuesday 8 December 2026" in t
-    assert "Alper" in t and "{{" not in t and "Nothing is sent" in t and "[time]" not in t and "at 18:00" in t
+    assert "organiser bot" in t and "Alper" not in t and "{{" not in t and "Nothing is sent" in t and "at 18:00" in t
 
 
 def test_post_and_manual_previews():
@@ -42,6 +42,7 @@ def test_invite_and_followup_emails_are_exact_and_complete():
     pl = {"name": "Anusha", "email": "a@example.com", "title": "From Models to Markets", "format": "main"}
     inv = preview.email_for("speaker_invite", pl, EV, "Alper")
     assert inv["to"] == "a@example.com" and "8 December" in inv["subject"] and "Main talk (30-40 minutes)" in inv["body"]
+    assert inv["body"].rstrip().endswith("(on behalf of the AI Signals organisers)") and "Alper" not in inv["body"]
     assert "within 5 days" in inv["body"] and "[" not in inv["body"] and "{{" not in inv["body"] and "at 18:00" in inv["body"]
     fol = preview.email_for("speaker_followup", pl, EV, "Alper")
     assert fol["subject"].startswith("Re:") and "haven't heard back" in fol["body"] and "{{" not in fol["body"]
