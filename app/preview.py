@@ -52,10 +52,10 @@ def _ctx(ev: dict, host: str | None) -> dict:
             "luma": ev.get("luma_url") or "(Luma link to follow)", "host": host or "the AI Signals team"}
 
 
-def _invite(name, title, ev, host, fmt=None):
-    """Speaker invite from the template: returns (subject, body)."""
+def _invite(name, title, ev, host, fmt=None, template="speaker_invite"):
+    """Speaker email from a template: returns (subject, body)."""
     c = _ctx(ev, host)
-    raw = (TEMPLATES / "speaker_invite.txt").read_text().replace(" {{ TIME }}", c["at_time"])
+    raw = (TEMPLATES / f"{template}.txt").read_text().replace("{{ TIME }}", c["at_time"])
     for k, v in {"{{ DATE }}": c["date_long"], "{{ VENUE }}": c["venue_full"],
                  "{{ NAME }}": name or "[speaker name]", "{{ TALK_TITLE }}": title or "[talk title]",
                  "{{ TALK_FORMAT }}": FORMATS.get(fmt, FORMATS[None]), "{{ ORGANISER }}": c["host"]}.items():
@@ -64,10 +64,14 @@ def _invite(name, title, ev, host, fmt=None):
     return first.removeprefix("Subject:").strip(), rest.strip()
 
 
-def draft(kind: str, payload: dict, ev: dict | None, host: str | None = None) -> dict | None:
-    """An email to create as a Gmail DRAFT (never sent) once the proposal is approved, or None."""
-    if kind == "cfp_review" and ev and payload.get("email"):
-        subject, body = _invite(payload.get("name"), payload.get("title"), ev, host, payload.get("format"))
+EMAIL_TEMPLATES = {"speaker_invite": "speaker_invite", "speaker_followup": "speaker_followup"}
+
+
+def email_for(kind: str, payload: dict, ev: dict | None, host: str | None = None) -> dict | None:
+    """The exact email that goes out if this proposal is approved, or None for kinds that send nothing."""
+    if kind in EMAIL_TEMPLATES and ev and payload.get("email"):
+        subject, body = _invite(payload.get("name"), payload.get("title"), ev, host, payload.get("format"),
+                                EMAIL_TEMPLATES[kind])
         return {"to": payload["email"], "subject": subject, "body": body}
     return None
 
@@ -80,17 +84,32 @@ def render(kind: str, payload: dict, ev: dict | None, host: str | None = None, f
         return payload.get("summary", "")
     c = _ctx(ev, host)
     head = "" if final else f"EVENT: {c['title']} - {c['date']} - {c['venue_name']}\n\n"
+    if kind in EMAIL_TEMPLATES:
+        e = email_for(kind, payload, ev, host)
+        who = f"{payload.get('name') or 'Unknown'} <{payload.get('email')}>"
+        if final:
+            return f"Email to {who}:\nSubject: {e['subject']}\n\n{e['body']}"[:LIMIT]
+        label = "Follow-up" if kind == "speaker_followup" else "Invitation"
+        return (f"{head}{label} email, ready to send. Check it carefully.\n\nTo: {who}\nSubject: {e['subject']}\n\n"
+                f"{e['body']}\n\nSend = this exact email goes out now from the AI Signals Gmail. Skip = nothing is sent.")[:LIMIT]
+    if kind == "speaker_reply":
+        who = f"{payload.get('name') or 'Unknown'} <{payload.get('email')}>"
+        guess = {"speaker_confirm": "sounds like a yes", "speaker_decline": "sounds like a no"}.get(payload.get("guess"), "unclear")
+        if final:
+            return f"Recorded reply from {who}."
+        return (f"{head}Reply from {who} about \"{payload.get('title')}\" ({guess}):\n\n{(payload.get('snippet') or '')[:900]}"
+                f"\n\nConfirmed = they're speaking (frees nothing, unlocks announcements). Declined = frees the slot and "
+                f"starts the next speaker. I'll handle = I'll reply myself.")[:LIMIT]
     if kind == "cfp_review":
         who = f"{payload.get('name') or 'Unknown'} <{payload.get('email')}>"
         if final:
-            d = draft(kind, payload, ev, host)
-            return (f"Gmail draft for {who}:\nSubject: {d['subject']}\n\n{d['body']}" if d else
-                    f"Proposal from {who}: no draft was made.")[:LIMIT]
+            return (f"Talk proposal from {who}: slot held. An invitation email will follow for your Send approval "
+                    f"(nothing is emailed yet).")
         body = f"Talk: {payload.get('title') or '[no title]'}\n\n{(payload.get('message') or '')[:900]}"
-        return (f"{head}New talk proposal from {who}\n\n{body}\n\nPick the format to approve: the Gmail DRAFT "
-                f"invitation (not sent, you send it) is for {c['title']}. Reject = skip, no email.")[:LIMIT]
+        return (f"{head}New talk proposal from {who}\n\n{body}\n\nPick the format to hold a slot. You'll then get the "
+                f"invitation email to approve before anything is sent. Reject = skip.")[:LIMIT]
     if kind == "speaker_email":
-        body = (TEMPLATES / "speaker_invite.txt").read_text().replace(" {{ TIME }}", c["at_time"])
+        body = (TEMPLATES / "speaker_invite.txt").read_text().replace("{{ TIME }}", c["at_time"])
         for k, v in {"{{ DATE }}": c["date_long"], "{{ VENUE }}": c["venue_full"], "{{ NAME }}": "[speaker name]",
                      "{{ TALK_TITLE }}": "[talk title]", "{{ TALK_FORMAT }}": FORMATS[None],
                      "{{ ORGANISER }}": c["host"]}.items():

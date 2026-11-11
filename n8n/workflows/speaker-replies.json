@@ -1,0 +1,161 @@
+{
+  "name": "Speaker replies",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "minutes",
+              "minutesInterval": 30
+            }
+          ]
+        }
+      },
+      "name": "Every 30 minutes",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [
+        0,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "url": "={{$env.CORE_URL}}/speakers/awaiting",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "X-Factory-Token",
+              "value": "={{$env.FACTORY_TOKEN}}"
+            }
+          ]
+        }
+      },
+      "name": "Who are we waiting on?",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        240,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const emails = $input.all().map(i => i.json.email).filter(Boolean);\nif (!emails.length) return [];\nreturn [{json: {q: 'from:(' + emails.join(' OR ') + ') newer_than:14d'}}];"
+      },
+      "name": "Build search",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        480,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "resource": "message",
+        "operation": "getAll",
+        "returnAll": false,
+        "limit": 30,
+        "simple": true,
+        "filters": {
+          "q": "={{$json.q}}"
+        },
+        "options": {}
+      },
+      "name": "Find replies",
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2.1,
+      "position": [
+        720,
+        0
+      ],
+      "credentials": {
+        "gmailOAuth2": {
+          "id": "VI2EDeCiUwgWaTlZ",
+          "name": "AI Signals Gmail"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{$env.CORE_URL}}/speakers/reply",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "X-Factory-Token",
+              "value": "={{$env.FACTORY_TOKEN}}"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({email: (String($json.From || '').match(/<([^>]+)>/) || [null, String($json.From || '')])[1], snippet: $json.snippet || '', message_id: $json.id}) }}",
+        "options": {
+          "response": {
+            "response": {
+              "neverError": true
+            }
+          }
+        }
+      },
+      "name": "Core /speakers/reply",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        960,
+        0
+      ]
+    }
+  ],
+  "connections": {
+    "Every 30 minutes": {
+      "main": [
+        [
+          {
+            "node": "Who are we waiting on?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Who are we waiting on?": {
+      "main": [
+        [
+          {
+            "node": "Build search",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build search": {
+      "main": [
+        [
+          {
+            "node": "Find replies",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Find replies": {
+      "main": [
+        [
+          {
+            "node": "Core /speakers/reply",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  }
+}

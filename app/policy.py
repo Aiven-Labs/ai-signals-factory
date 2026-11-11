@@ -24,6 +24,9 @@ KIND_PERMISSION = {
     "reminder": "approve_public_post",
     "manual": "approve_manual_step",
     "cfp_review": "approve_speaker_contact",
+    "speaker_invite": "approve_speaker_contact",
+    "speaker_followup": "approve_speaker_contact",
+    "speaker_reply": "approve_speaker_contact",
 }
 
 

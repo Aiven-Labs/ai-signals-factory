@@ -1,0 +1,13 @@
+Subject: Re: Speaking at AI Signals on {{ DATE }}
+
+Hi {{ NAME }},
+
+A quick follow-up on our invitation to give a talk, "{{ TALK_TITLE }}", at AI Signals on {{ DATE }}{{ TIME }} at {{ VENUE }}.
+
+Format: {{ TALK_FORMAT }}
+
+We haven't heard back yet. Could you let us know whether you can make it? If we don't hear from you in the next few days we'll offer the slot to another speaker.
+
+Best regards,
+{{ ORGANISER }}
+AI Signals Team

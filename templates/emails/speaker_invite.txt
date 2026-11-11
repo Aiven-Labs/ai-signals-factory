@@ -2,12 +2,12 @@ Subject: Speaking at AI Signals on {{ DATE }} - we'd love to have you!
 
 Hi {{ NAME }},
 
-Your talk proposal "{{ TALK_TITLE }}" has been accepted. Are you available to speak at our event on {{ DATE }} {{ TIME }}?
+Thank you for submitting "{{ TALK_TITLE }}" to AI Signals. We'd love to have you speak at our event on {{ DATE }}{{ TIME }}.
 
 Venue: {{ VENUE }}
 Format: {{ TALK_FORMAT }}
 
-Please confirm your availability and let us know if you have any questions.
+Could you let us know within 5 days whether you can make it? We have a small number of slots, so if we don't hear back we may offer yours to another speaker.
 
 Best regards,
 {{ ORGANISER }}

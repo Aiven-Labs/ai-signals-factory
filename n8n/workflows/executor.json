@@ -51,8 +51,8 @@
           },
           "conditions": [
             {
-              "id": "has-draft",
-              "leftValue": "={{ !!$json.draft }}",
+              "id": "has-email",
+              "leftValue": "={{ !!$json.email }}",
               "rightValue": "",
               "operator": {
                 "type": "boolean",
@@ -64,7 +64,7 @@
           "combinator": "and"
         }
       },
-      "name": "Has email draft?",
+      "name": "Has email?",
       "type": "n8n-nodes-base.if",
       "typeVersion": 2.2,
       "position": [
@@ -74,16 +74,17 @@
     },
     {
       "parameters": {
-        "resource": "draft",
-        "operation": "create",
-        "subject": "={{$json.draft.subject}}",
+        "resource": "message",
+        "operation": "send",
+        "sendTo": "={{$json.email.to}}",
+        "subject": "={{$json.email.subject}}",
         "emailType": "text",
-        "message": "={{$json.draft.body}}",
+        "message": "={{$json.email.body}}",
         "options": {
-          "sendTo": "={{$json.draft.to}}"
+          "appendAttribution": false
         }
       },
-      "name": "Create Gmail draft (not sent)",
+      "name": "Send email (approved)",
       "type": "n8n-nodes-base.gmail",
       "typeVersion": 2.1,
       "position": [
@@ -100,8 +101,68 @@
     },
     {
       "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "typeValidation": "loose",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "sent",
+              "leftValue": "={{ !!$json.id }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        }
+      },
+      "name": "Email went out?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        960,
+        -80
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{$env.CORE_URL + '/proposals/' + $('Core /executor/queue').item.json.pid + '/email_failed'}}",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "X-Factory-Token",
+              "value": "={{$env.FACTORY_TOKEN}}"
+            }
+          ]
+        },
+        "options": {
+          "response": {
+            "response": {
+              "neverError": true
+            }
+          }
+        }
+      },
+      "name": "Record failure",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1200,
+        0
+      ]
+    },
+    {
+      "parameters": {
         "chatId": "={{$('Core /executor/queue').item.json.chat_id}}",
-        "text": "={{$('Core /executor/queue').item.json.text}}",
+        "text": "={{ ($('Core /executor/queue').item.json.email ? ($json.id ? 'EMAIL SENT. ' : 'EMAIL FAILED, NOT SENT. ') : '') + $('Core /executor/queue').item.json.text }}",
         "additionalFields": {
           "appendAttribution": false
         }
@@ -110,19 +171,19 @@
       "type": "n8n-nodes-base.telegram",
       "typeVersion": 1.2,
       "position": [
-        960,
+        1440,
         0
       ],
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 2000,
+      "onError": "continueRegularOutput",
       "credentials": {
         "telegramApi": {
           "id": "__CRED_ID__",
           "name": "AI Signals bot"
         }
-      },
-      "retryOnFail": true,
-      "maxTries": 3,
-      "waitBetweenTries": 2000,
-      "onError": "continueRegularOutput"
+      }
     }
   ],
   "connections": {
@@ -141,18 +202,18 @@
       "main": [
         [
           {
-            "node": "Has email draft?",
+            "node": "Has email?",
             "type": "main",
             "index": 0
           }
         ]
       ]
     },
-    "Has email draft?": {
+    "Has email?": {
       "main": [
         [
           {
-            "node": "Create Gmail draft (not sent)",
+            "node": "Send email (approved)",
             "type": "main",
             "index": 0
           }
@@ -166,7 +227,36 @@
         ]
       ]
     },
-    "Create Gmail draft (not sent)": {
+    "Send email (approved)": {
+      "main": [
+        [
+          {
+            "node": "Email went out?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Email went out?": {
+      "main": [
+        [
+          {
+            "node": "Hand over to approver",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Record failure",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Record failure": {
       "main": [
         [
           {

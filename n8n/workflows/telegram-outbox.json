@@ -43,29 +43,95 @@
     },
     {
       "parameters": {
-        "conditions": {
-          "options": {
-            "caseSensitive": true,
-            "typeValidation": "loose",
-            "version": 2
-          },
-          "conditions": [
+        "rules": {
+          "values": [
             {
-              "id": "is-cfp",
-              "leftValue": "={{$json.kind}}",
-              "rightValue": "cfp_review",
-              "operator": {
-                "type": "string",
-                "operation": "equals"
-              }
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "typeValidation": "loose",
+                  "version": 2
+                },
+                "combinator": "or",
+                "conditions": [
+                  {
+                    "id": "k0",
+                    "leftValue": "={{$json.kind}}",
+                    "rightValue": "cfp_review",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    }
+                  }
+                ]
+              },
+              "renameOutput": true,
+              "outputKey": "talk"
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "typeValidation": "loose",
+                  "version": 2
+                },
+                "combinator": "or",
+                "conditions": [
+                  {
+                    "id": "k0",
+                    "leftValue": "={{$json.kind}}",
+                    "rightValue": "speaker_invite",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    }
+                  },
+                  {
+                    "id": "k1",
+                    "leftValue": "={{$json.kind}}",
+                    "rightValue": "speaker_followup",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    }
+                  }
+                ]
+              },
+              "renameOutput": true,
+              "outputKey": "email"
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "typeValidation": "loose",
+                  "version": 2
+                },
+                "combinator": "or",
+                "conditions": [
+                  {
+                    "id": "k0",
+                    "leftValue": "={{$json.kind}}",
+                    "rightValue": "speaker_reply",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    }
+                  }
+                ]
+              },
+              "renameOutput": true,
+              "outputKey": "reply"
             }
-          ],
-          "combinator": "and"
+          ]
+        },
+        "options": {
+          "fallbackOutput": "extra"
         }
       },
-      "name": "Talk proposal?",
-      "type": "n8n-nodes-base.if",
-      "typeVersion": 2.2,
+      "name": "Which card?",
+      "type": "n8n-nodes-base.switch",
+      "typeVersion": 3.2,
       "position": [
         480,
         0
@@ -112,19 +178,123 @@
       "type": "n8n-nodes-base.telegram",
       "typeVersion": 1.2,
       "position": [
-        720,
-        -100
+        760,
+        -240
       ],
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 2000,
+      "onError": "continueRegularOutput",
       "credentials": {
         "telegramApi": {
           "id": "__CRED_ID__",
           "name": "AI Signals bot"
         }
+      }
+    },
+    {
+      "parameters": {
+        "chatId": "={{$json.chat_id}}",
+        "text": "={{$json.text}}",
+        "replyMarkup": "inlineKeyboard",
+        "inlineKeyboard": {
+          "rows": [
+            {
+              "row": {
+                "buttons": [
+                  {
+                    "text": "Send email",
+                    "additionalFields": {
+                      "callback_data": "={{'a:' + $json.pid}}"
+                    }
+                  },
+                  {
+                    "text": "Skip",
+                    "additionalFields": {
+                      "callback_data": "={{'r:' + $json.pid}}"
+                    }
+                  }
+                ]
+              }
+            }
+          ]
+        },
+        "additionalFields": {
+          "appendAttribution": false
+        }
       },
+      "name": "Send email approval",
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.2,
+      "position": [
+        760,
+        -80
+      ],
       "retryOnFail": true,
       "maxTries": 3,
       "waitBetweenTries": 2000,
-      "onError": "continueRegularOutput"
+      "onError": "continueRegularOutput",
+      "credentials": {
+        "telegramApi": {
+          "id": "__CRED_ID__",
+          "name": "AI Signals bot"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "chatId": "={{$json.chat_id}}",
+        "text": "={{$json.text}}",
+        "replyMarkup": "inlineKeyboard",
+        "inlineKeyboard": {
+          "rows": [
+            {
+              "row": {
+                "buttons": [
+                  {
+                    "text": "Confirmed",
+                    "additionalFields": {
+                      "callback_data": "={{'c:' + $json.pid}}"
+                    }
+                  },
+                  {
+                    "text": "Declined",
+                    "additionalFields": {
+                      "callback_data": "={{'d:' + $json.pid}}"
+                    }
+                  },
+                  {
+                    "text": "I'll handle",
+                    "additionalFields": {
+                      "callback_data": "={{'h:' + $json.pid}}"
+                    }
+                  }
+                ]
+              }
+            }
+          ]
+        },
+        "additionalFields": {
+          "appendAttribution": false
+        }
+      },
+      "name": "Send reply card",
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.2,
+      "position": [
+        760,
+        80
+      ],
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 2000,
+      "onError": "continueRegularOutput",
+      "credentials": {
+        "telegramApi": {
+          "id": "__CRED_ID__",
+          "name": "AI Signals bot"
+        }
+      }
     },
     {
       "parameters": {
@@ -161,19 +331,19 @@
       "type": "n8n-nodes-base.telegram",
       "typeVersion": 1.2,
       "position": [
-        720,
-        100
+        760,
+        240
       ],
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 2000,
+      "onError": "continueRegularOutput",
       "credentials": {
         "telegramApi": {
           "id": "__CRED_ID__",
           "name": "AI Signals bot"
         }
-      },
-      "retryOnFail": true,
-      "maxTries": 3,
-      "waitBetweenTries": 2000,
-      "onError": "continueRegularOutput"
+      }
     }
   ],
   "connections": {
@@ -192,18 +362,32 @@
       "main": [
         [
           {
-            "node": "Talk proposal?",
+            "node": "Which card?",
             "type": "main",
             "index": 0
           }
         ]
       ]
     },
-    "Talk proposal?": {
+    "Which card?": {
       "main": [
         [
           {
             "node": "Send talk proposal",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Send email approval",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Send reply card",
             "type": "main",
             "index": 0
           }

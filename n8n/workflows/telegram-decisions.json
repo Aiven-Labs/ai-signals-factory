@@ -37,7 +37,7 @@
         },
         "sendBody": true,
         "specifyBody": "json",
-        "jsonBody": "={{ JSON.stringify({telegram_id: String($json.callback_query.from.id), decision: $json.callback_query.data.startsWith('r:') ? 'rejected' : 'approved', variant: $json.callback_query.data.startsWith('m:') ? 'main' : ($json.callback_query.data.startsWith('l:') ? 'lightning' : null)}) }}",
+        "jsonBody": "={{ JSON.stringify({telegram_id: String($json.callback_query.from.id), decision: $json.callback_query.data.startsWith('r:') ? 'rejected' : 'approved', variant: ({m:'main', l:'lightning', c:'confirmed', d:'declined', h:'review'})[$json.callback_query.data.split(':')[0]] || null}) }}",
         "options": {
           "response": {
             "response": {

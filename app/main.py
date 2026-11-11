@@ -46,7 +46,8 @@ def audit(conn, actor, action, detail):
                  (actor, action, json.dumps(detail)))
 
 
-EVENT_KINDS = {"manual", "speaker_email", "public_post", "reminder", "cfp_review"}
+EVENT_KINDS = {"manual", "speaker_email", "public_post", "reminder", "cfp_review",
+               "speaker_invite", "speaker_followup", "speaker_reply"}
 
 
 def propose(conn, idem_key, kind, payload, requested_by="system", event_id=None):
@@ -91,6 +92,35 @@ class DecisionIn(BaseModel):
     decided_by: int          # organisers.id
 
 
+def propose_invite(conn, event_id, speaker_id, fmt, title, kind="speaker_invite"):
+    """Ask the organisers to approve one specific email to one speaker. Nothing is sent until they do."""
+    sp = conn.execute("SELECT name, email FROM speakers WHERE id=%s", (speaker_id,)).fetchone()
+    n = conn.execute("SELECT count(*) AS n FROM proposed_actions WHERE kind=%s AND event_id=%s "
+                     "AND (payload->>'speaker_id')::int=%s", (kind, event_id, speaker_id)).fetchone()["n"]
+    label = "Follow-up email" if kind == "speaker_followup" else "Invitation email"
+    return propose(conn, f"{kind}:{event_id}:{speaker_id}:{n + 1}", kind,
+                   {"summary": f"{label} to {sp['name']}", "speaker_id": speaker_id, "email": sp["email"],
+                    "name": sp["name"], "title": title, "format": fmt, "event_id": event_id}, event_id=event_id)
+
+
+def fill_slot(conn, event_id, fmt):
+    """A slot freed up: invite the next eligible speaker from the waitlist (still needs approval to email)."""
+    if not slots.can_invite(slot_counts(conn, event_id), fmt):
+        return None
+    nxt = conn.execute("SELECT speaker_id, talk_title FROM event_speakers WHERE event_id=%s AND state='pitched' "
+                       "ORDER BY priority NULLS LAST, updated_at LIMIT 1", (event_id,)).fetchone()
+    if not nxt:
+        ev = conn.execute("SELECT title FROM events WHERE id=%s", (event_id,)).fetchone()
+        propose(conn, f"noslot:{event_id}:{fmt}:{date.today().isoformat()}", "escalation",
+                {"summary": f"No waitlisted speaker left for the free {fmt} slot at {ev['title']}. Check the CFP."},
+                event_id=event_id)
+        return None
+    conn.execute("UPDATE event_speakers SET state='invited', format=%s, invited_at=NULL, followup_sent_at=NULL, "
+                 "last_reply_at=NULL, reason=NULL, updated_at=now() WHERE event_id=%s AND speaker_id=%s",
+                 (fmt, event_id, nxt["speaker_id"]))
+    return propose_invite(conn, event_id, nxt["speaker_id"], fmt, nxt["talk_title"])
+
+
 def slot_counts(conn, event_id) -> dict:
     rows = conn.execute("SELECT format, count(*) AS n FROM event_speakers WHERE event_id=%s AND state = ANY(%s) "
                         "AND format IS NOT NULL GROUP BY format", (event_id, list(slots.HOLDING))).fetchall()
@@ -109,6 +139,8 @@ def apply_decision(conn, pid: int, decision: str, organiser_id: int, variant: st
         audit(conn, org["name"], "decide_denied", {"id": pid, "kind": prop["kind"]})
         conn.commit()
         raise HTTPException(403, "role not allowed to decide this")
+    if decision == "approved" and prop["kind"] == "speaker_reply" and variant not in ("confirmed", "declined", "review"):
+        raise HTTPException(422, "Pick Confirmed, Declined or I'll handle")
     if decision == "approved" and prop["kind"] == "cfp_review":
         if variant not in slots.FORMATS:
             raise HTTPException(422, "Pick Main talk or Lightning talk to approve a talk proposal")
@@ -125,6 +157,22 @@ def apply_decision(conn, pid: int, decision: str, organiser_id: int, variant: st
                          "VALUES (%s,%s,%s,'invited',%s) ON CONFLICT (event_id, speaker_id) "
                          "DO UPDATE SET state='invited', format=EXCLUDED.format, talk_title=EXCLUDED.talk_title, updated_at=now()",
                          (prop["event_id"], prop["payload"].get("speaker_id"), prop["payload"].get("title"), variant))
+            propose_invite(conn, prop["event_id"], prop["payload"].get("speaker_id"), variant, prop["payload"].get("title"))
+    sid, eid, fmt_row = prop["payload"].get("speaker_id"), prop["event_id"], None
+    if sid and prop["kind"] in ("speaker_invite", "speaker_followup", "speaker_reply") and eid:
+        fmt_row = (conn.execute("SELECT format FROM event_speakers WHERE event_id=%s AND speaker_id=%s", (eid, sid))
+                   .fetchone() or {}).get("format")
+        if prop["kind"] == "speaker_invite" and decision == "rejected":     # skipped: free the slot, next in line
+            conn.execute("UPDATE event_speakers SET state='pitched', reason='invite skipped', updated_at=now() "
+                         "WHERE event_id=%s AND speaker_id=%s", (eid, sid))
+            fill_slot(conn, eid, fmt_row or prop["payload"].get("format"))
+        if prop["kind"] == "speaker_reply" and decision == "approved":
+            if variant == "confirmed":
+                conn.execute("UPDATE event_speakers SET state='confirmed', updated_at=now() WHERE event_id=%s AND speaker_id=%s", (eid, sid))
+            elif variant == "declined":
+                conn.execute("UPDATE event_speakers SET state='declined', reason='declined by speaker', updated_at=now() "
+                             "WHERE event_id=%s AND speaker_id=%s", (eid, sid))
+                fill_slot(conn, eid, fmt_row or prop["payload"].get("format"))
     audit(conn, org["name"], decision, {"id": pid, "variant": variant})
     return {"id": pid, "status": decision, "by": org["name"], "kind": prop["kind"], "variant": variant}
 
@@ -224,6 +272,36 @@ def event_speakers(event_id: int, conn=Depends(db)):
     return {"slots": slots.describe(slot_counts(conn, event_id)), "speakers": rows}
 
 
+@app.get("/speakers/awaiting", dependencies=[Depends(auth)])
+def speakers_awaiting(conn=Depends(db)):
+    """Invited speakers whose emails have gone out and who haven't replied yet (n8n looks for their replies)."""
+    return conn.execute("SELECT es.event_id, es.speaker_id, s.email FROM event_speakers es JOIN speakers s ON s.id=es.speaker_id "
+                        "WHERE es.state='invited' AND es.invited_at IS NOT NULL AND es.last_reply_at IS NULL").fetchall()
+
+
+class ReplyIn(BaseModel):
+    email: str
+    snippet: str = ""
+    message_id: str
+
+
+@app.post("/speakers/reply", dependencies=[Depends(auth)])
+def speaker_reply(r: ReplyIn, conn=Depends(db)):
+    """A speaker answered. Stop the follow-up and expiry timers and ask an organiser what it means."""
+    row = conn.execute("SELECT es.event_id, es.speaker_id, es.talk_title, s.name FROM event_speakers es "
+                       "JOIN speakers s ON s.id=es.speaker_id WHERE lower(s.email)=lower(%s) AND es.state='invited' "
+                       "AND es.invited_at IS NOT NULL AND es.last_reply_at IS NULL", (r.email.strip(),)).fetchone()
+    if not row:
+        return {"skipped": "no invited speaker waiting on that address"}
+    conn.execute("UPDATE event_speakers SET last_reply_at=now(), updated_at=now() WHERE event_id=%s AND speaker_id=%s",
+                 (row["event_id"], row["speaker_id"]))
+    pid = propose(conn, f"reply:{row['event_id']}:{row['speaker_id']}:{r.message_id}", "speaker_reply",
+                  {"summary": f"Reply from {row['name']}", "speaker_id": row["speaker_id"], "email": r.email.strip().lower(),
+                   "name": row["name"], "title": row["talk_title"], "snippet": r.snippet[:1500],
+                   "guess": clf.classify_rules(r.snippet), "event_id": row["event_id"]}, event_id=row["event_id"])
+    return {"proposal": pid}
+
+
 @app.get("/outbox", dependencies=[Depends(auth)])
 def outbox(conn=Depends(db)):
     """One row per (pending, not yet announced proposal, organiser who may decide it and has Telegram linked)."""
@@ -279,16 +357,35 @@ def executor_queue(conn=Depends(db)):
     for p in rows:
         ev, host = event_ctx(conn, p["event_id"])
         artifact = preview.render(p["kind"], p["payload"], ev, host, final=True)
-        draft = preview.draft(p["kind"], p["payload"], ev, host)
-        note = ("A Gmail draft is being created in Drafts (NOT sent). Check and send it yourself."
-                if draft else "Nothing was sent automatically (no sending account is connected for this).")
+        email = preview.email_for(p["kind"], p["payload"], ev, host)
+        if email:      # an approved email: stamp the send time now so a restart can never send it twice
+            col = "followup_sent_at" if p["kind"] == "speaker_followup" else "invited_at"
+            conn.execute(f"UPDATE event_speakers SET {col}=now(), updated_at=now() WHERE event_id=%s AND speaker_id=%s",
+                         (p["event_id"], p["payload"].get("speaker_id")))
+            audit(conn, "executor", "email_released", {"id": p["id"], "kind": p["kind"], "to_speaker": p["payload"].get("speaker_id")})
+        note = ("Sending the email to the speaker now, exactly as shown." if email
+                else "Nothing was sent automatically (no sending account is connected for this).")
         text = f"Approved #{p['id']} [{p['kind']}] by {p['decider']}.\n{note}\n\n{artifact}"
         conn.execute("UPDATE proposed_actions SET status='done', executed_at=now() WHERE id=%s", (p["id"],))
         audit(conn, "executor", "handed_over", {"id": p["id"], "kind": p["kind"]})
         if p["decider_chat"]:
             out.append({"pid": p["id"], "kind": p["kind"], "chat_id": p["decider_chat"], "text": text[:4000],
-                        "draft": draft})
+                        "email": email})
     return out
+
+
+@app.post("/proposals/{pid}/email_failed", dependencies=[Depends(auth)])
+def email_failed(pid: int, conn=Depends(db)):
+    """n8n could not send an approved email. Clear the sent stamp so timers don't run for an email that never left."""
+    p = conn.execute("SELECT * FROM proposed_actions WHERE id=%s", (pid,)).fetchone()
+    if not p or p["kind"] not in ("speaker_invite", "speaker_followup"):
+        raise HTTPException(404, "not an email proposal")
+    col = "followup_sent_at" if p["kind"] == "speaker_followup" else "invited_at"
+    conn.execute(f"UPDATE event_speakers SET {col}=NULL, updated_at=now() WHERE event_id=%s AND speaker_id=%s",
+                 (p["event_id"], p["payload"].get("speaker_id")))
+    conn.execute("UPDATE proposed_actions SET status='failed' WHERE id=%s", (pid,))
+    audit(conn, "executor", "email_failed", {"id": pid})
+    return {"id": pid, "status": "failed"}
 
 
 @app.post("/proposals/{pid}/done", dependencies=[Depends(auth)])
@@ -333,7 +430,21 @@ def tick(today: date | None = None, conn=Depends(db)):
             if propose(conn, f"step:{ev['id']}:{s.key}", s.kind,
                        {"summary": f"{ev['title']}: {s.title}", "event_id": ev["id"], "step": s.key}, event_id=ev["id"]):
                 created += 1
-    return {"created": created, "steps_defined": len(STEPS)}
+    followups = expired = 0
+    for r in conn.execute("SELECT es.event_id, es.speaker_id, es.format, es.talk_title, es.followup_sent_at, "
+                          "(now() - es.invited_at) AS age FROM event_speakers es JOIN events e ON e.id=es.event_id "
+                          "WHERE es.state='invited' AND es.invited_at IS NOT NULL AND es.last_reply_at IS NULL "
+                          "AND e.status IN ('planning','confirmed')").fetchall():
+        if r["age"] >= timedelta(days=5):            # no reply: free the slot, offer it to the next speaker
+            conn.execute("UPDATE event_speakers SET state='declined', reason='no reply after 5 days', updated_at=now() "
+                         "WHERE event_id=%s AND speaker_id=%s", (r["event_id"], r["speaker_id"]))
+            audit(conn, "tick", "speaker_expired", {"event_id": r["event_id"], "speaker_id": r["speaker_id"]})
+            fill_slot(conn, r["event_id"], r["format"])
+            expired += 1
+        elif r["age"] >= timedelta(days=2) and r["followup_sent_at"] is None:
+            if propose_invite(conn, r["event_id"], r["speaker_id"], r["format"], r["talk_title"], kind="speaker_followup"):
+                followups += 1
+    return {"created": created, "followups_proposed": followups, "expired": expired, "steps_defined": len(STEPS)}
 
 
 class GrantIn(BaseModel):
