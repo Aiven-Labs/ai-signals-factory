@@ -18,3 +18,8 @@ def test_admin_cannot_self_approve_access_grant():
 
 def test_unknown_kind_denied():
     assert not can_decide("admin", "launch_missiles", 1)
+
+
+def test_manual_steps_can_be_decided_by_volunteers_but_not_observers():
+    assert can_decide("volunteer", "manual", 1)
+    assert not can_decide("observer", "manual", 1)
