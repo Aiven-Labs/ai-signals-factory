@@ -120,7 +120,11 @@
           "id": "__CRED_ID__",
           "name": "AI Signals bot"
         }
-      }
+      },
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 2000,
+      "onError": "continueRegularOutput"
     },
     {
       "parameters": {
@@ -165,7 +169,11 @@
           "id": "__CRED_ID__",
           "name": "AI Signals bot"
         }
-      }
+      },
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 2000,
+      "onError": "continueRegularOutput"
     }
   ],
   "connections": {

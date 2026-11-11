@@ -1,33 +1,181 @@
 {
   "name": "Executor",
   "nodes": [
-    {"parameters": {"rule": {"interval": [{"field": "minutes", "minutesInterval": 1}]}},
-     "name": "Every minute", "type": "n8n-nodes-base.scheduleTrigger", "typeVersion": 1.2, "position": [0, 0]},
-    {"parameters": {"url": "={{$env.CORE_URL}}/executor/queue", "sendHeaders": true,
-                    "headerParameters": {"parameters": [{"name": "X-Factory-Token", "value": "={{$env.FACTORY_TOKEN}}"}]}},
-     "name": "Core /executor/queue", "type": "n8n-nodes-base.httpRequest", "typeVersion": 4.2, "position": [240, 0]},
-    {"parameters": {"conditions": {"options": {"caseSensitive": true, "typeValidation": "loose", "version": 2},
-                    "conditions": [{"id": "has-draft", "leftValue": "={{ !!$json.draft }}", "rightValue": "",
-                                    "operator": {"type": "boolean", "operation": "true", "singleValue": true}}],
-                    "combinator": "and"}},
-     "name": "Has email draft?", "type": "n8n-nodes-base.if", "typeVersion": 2.2, "position": [480, 0]},
-    {"parameters": {"resource": "draft", "operation": "create", "subject": "={{$json.draft.subject}}",
-                    "emailType": "text", "message": "={{$json.draft.body}}",
-                    "options": {"sendTo": "={{$json.draft.to}}"}},
-     "name": "Create Gmail draft (not sent)", "type": "n8n-nodes-base.gmail", "typeVersion": 2.1, "position": [720, -80],
-     "onError": "continueRegularOutput",
-     "credentials": {"gmailOAuth2": {"id": "VI2EDeCiUwgWaTlZ", "name": "AI Signals Gmail"}}},
-    {"parameters": {"chatId": "={{$('Core /executor/queue').item.json.chat_id}}",
-                    "text": "={{$('Core /executor/queue').item.json.text}}",
-                    "additionalFields": {"appendAttribution": false}},
-     "name": "Hand over to approver", "type": "n8n-nodes-base.telegram", "typeVersion": 1.2, "position": [960, 0],
-     "credentials": {"telegramApi": {"id": "__CRED_ID__", "name": "AI Signals bot"}}}
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "minutes",
+              "minutesInterval": 1
+            }
+          ]
+        }
+      },
+      "name": "Every minute",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [
+        0,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "url": "={{$env.CORE_URL}}/executor/queue",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "X-Factory-Token",
+              "value": "={{$env.FACTORY_TOKEN}}"
+            }
+          ]
+        }
+      },
+      "name": "Core /executor/queue",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        240,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "typeValidation": "loose",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "has-draft",
+              "leftValue": "={{ !!$json.draft }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        }
+      },
+      "name": "Has email draft?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        480,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "resource": "draft",
+        "operation": "create",
+        "subject": "={{$json.draft.subject}}",
+        "emailType": "text",
+        "message": "={{$json.draft.body}}",
+        "options": {
+          "sendTo": "={{$json.draft.to}}"
+        }
+      },
+      "name": "Create Gmail draft (not sent)",
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2.1,
+      "position": [
+        720,
+        -80
+      ],
+      "onError": "continueRegularOutput",
+      "credentials": {
+        "gmailOAuth2": {
+          "id": "VI2EDeCiUwgWaTlZ",
+          "name": "AI Signals Gmail"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "chatId": "={{$('Core /executor/queue').item.json.chat_id}}",
+        "text": "={{$('Core /executor/queue').item.json.text}}",
+        "additionalFields": {
+          "appendAttribution": false
+        }
+      },
+      "name": "Hand over to approver",
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.2,
+      "position": [
+        960,
+        0
+      ],
+      "credentials": {
+        "telegramApi": {
+          "id": "__CRED_ID__",
+          "name": "AI Signals bot"
+        }
+      },
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 2000,
+      "onError": "continueRegularOutput"
+    }
   ],
   "connections": {
-    "Every minute": {"main": [[{"node": "Core /executor/queue", "type": "main", "index": 0}]]},
-    "Core /executor/queue": {"main": [[{"node": "Has email draft?", "type": "main", "index": 0}]]},
-    "Has email draft?": {"main": [[{"node": "Create Gmail draft (not sent)", "type": "main", "index": 0}],
-                                  [{"node": "Hand over to approver", "type": "main", "index": 0}]]},
-    "Create Gmail draft (not sent)": {"main": [[{"node": "Hand over to approver", "type": "main", "index": 0}]]}
+    "Every minute": {
+      "main": [
+        [
+          {
+            "node": "Core /executor/queue",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Core /executor/queue": {
+      "main": [
+        [
+          {
+            "node": "Has email draft?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Has email draft?": {
+      "main": [
+        [
+          {
+            "node": "Create Gmail draft (not sent)",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Hand over to approver",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Create Gmail draft (not sent)": {
+      "main": [
+        [
+          {
+            "node": "Hand over to approver",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
   }
 }
